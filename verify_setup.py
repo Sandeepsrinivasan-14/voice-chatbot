@@ -28,6 +28,8 @@ from cuda_dlls import ensure_cuda_dlls_on_path  # noqa: E402
 
 ensure_cuda_dlls_on_path()  # must run before faster_whisper/ctranslate2 is ever imported
 
+from config import CONFIG  # noqa: E402
+
 
 def check_cuda() -> bool:
     print("\n[1/4] Checking CUDA availability for faster-whisper (CTranslate2)...")
@@ -57,7 +59,9 @@ def check_faster_whisper() -> bool:
 
         device = "cuda"
         try:
-            model = WhisperModel("small", device="cuda", compute_type="int8_float16")
+            model = WhisperModel(
+                CONFIG.whisper_model_size, device="cuda", compute_type=CONFIG.whisper_compute_type_gpu
+            )
             # Construction can succeed on Windows even when cuBLAS/cuDNN
             # DLLs are missing -- the failure only shows up on the first
             # real inference call, so we force one here before trusting GPU.
@@ -65,7 +69,9 @@ def check_faster_whisper() -> bool:
         except Exception as exc:
             print(f"  GPU path unusable ({exc}), falling back to CPU.")
             device = "cpu"
-            model = WhisperModel("small", device="cpu", compute_type="int8")
+            model = WhisperModel(
+                CONFIG.whisper_model_size, device="cpu", compute_type=CONFIG.whisper_compute_type_cpu
+            )
 
         segments, info = model.transcribe(audio, language="en")
         list(segments)  # force generator to run
@@ -81,12 +87,12 @@ def check_ollama() -> bool:
     try:
         import requests
 
-        resp = requests.get("http://localhost:11434/api/tags", timeout=5)
+        resp = requests.get(f"{CONFIG.ollama_url}/api/tags", timeout=5)
         resp.raise_for_status()
         models = [m["name"] for m in resp.json().get("models", [])]
         if not models:
             print("  WARN -- Ollama is running but no models are pulled. Run:\n"
-                  "         ollama pull llama3.2:3b")
+                  f"         ollama pull {CONFIG.ollama_model}")
             return False
         print(f"  Ollama is running. Installed models: {models}")
 
@@ -96,16 +102,16 @@ def check_ollama() -> bool:
         # than timing out and reporting a false FAIL.
         print(f"  Cold-starting '{model_name}' (first load can take a while)...")
         gen = requests.post(
-            "http://localhost:11434/api/generate",
+            f"{CONFIG.ollama_url}/api/generate",
             json={"model": model_name, "prompt": "Say OK.", "stream": False},
-            timeout=180,
+            timeout=CONFIG.ollama_timeout_s,
         )
         gen.raise_for_status()
         text = gen.json().get("response", "").strip()
         print(f"  PASS -- '{model_name}' responded: {text[:80]!r}")
         return True
     except requests.exceptions.ConnectionError:
-        print("  FAIL -- could not connect to http://localhost:11434. "
+        print(f"  FAIL -- could not connect to {CONFIG.ollama_url}. "
               "Run `ollama serve` (or start the Ollama app) first.")
         return False
     except Exception as exc:
@@ -113,22 +119,10 @@ def check_ollama() -> bool:
         return False
 
 
-def _default_piper_executable() -> str:
-    # piper-tts installs its console script next to the interpreter it was
-    # pip-installed into (venv/Scripts on Windows) -- resolve relative to
-    # sys.executable so this works without the venv being `activate`d.
-    candidate = os.path.join(
-        os.path.dirname(sys.executable), "piper.exe" if os.name == "nt" else "piper"
-    )
-    return candidate if os.path.exists(candidate) else "piper"
-
-
 def check_piper() -> bool:
     print("\n[4/4] Checking Piper TTS synthesis...")
-    piper_exe = os.environ.get("PIPER_EXECUTABLE", _default_piper_executable())
-    model_path = os.environ.get(
-        "PIPER_MODEL_PATH", os.path.join("models", "piper", "en_US-lessac-medium.onnx")
-    )
+    piper_exe = CONFIG.piper_executable
+    model_path = CONFIG.piper_model_path
     if not os.path.exists(model_path):
         print(f"  FAIL -- voice model not found at {model_path}. Download one from "
               "https://github.com/rhasspy/piper/releases (.onnx + .onnx.json) "

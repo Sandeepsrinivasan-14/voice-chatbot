@@ -1,0 +1,18 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["venv", ".venv", "data", "models", "logs"]
+
+[tool.ruff.lint]
+# Kept deliberately small -- this is a portfolio project, not a large
+# team codebase. Unused imports/variables and obvious bugs matter most;
+# stylistic rules (import sorting, docstring conventions, etc.) don't
+# pull their weight here.
+select = ["E", "F", "W"]
+ignore = [
+    "E501",  # line length -- long comments/docstrings are common and fine here
+]

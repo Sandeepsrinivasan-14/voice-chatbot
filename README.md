@@ -163,8 +163,15 @@ python -m venv venv
 source venv/bin/activate       # Linux/Mac
 venv\Scripts\activate          # Windows
 
-# Install dependencies
-pip install -r requirements.txt
+# Install dependencies -- pick one:
+pip install -r requirements.txt       # CPU only
+pip install -r requirements-gpu.txt   # + CUDA wheels for GPU Whisper (~1.3GB)
+pip install -r requirements-dev.txt   # + pytest/ruff, for running the test suite
+
+# Optional: copy .env.example to .env and edit any values you want to
+# override (model name, ports, confidence threshold, ...). Every setting
+# has a sensible default (see src/config.py) -- .env is not required.
+cp .env.example .env
 
 # Install and start Ollama, pull the local model
 # (llama3.2:3b chosen after head-to-head testing against qwen2.5:3b-instruct --
@@ -174,6 +181,13 @@ ollama pull llama3.2:3b
 
 # Verify everything is installed correctly
 python verify_setup.py
+```
+
+To run the test suite (no GPU/Ollama/mic required -- everything's mocked):
+```bash
+pip install -r requirements-dev.txt
+ruff check .
+pytest -v
 ```
 
 ---
@@ -205,6 +219,14 @@ python src/cli.py
   `/api/generate` calls) — ask a follow-up and it remembers context.
 - Same offline guarantee as everywhere else: Flask binds to `127.0.0.1` only: your
   voice and the model's replies never leave this machine.
+- Runs on Flask's development server by default (fine for local use). Set
+  `PRODUCTION=1` to serve via `waitress` instead — a real production WSGI
+  server, and Windows-compatible (`gunicorn` isn't):
+  ```bash
+  set PRODUCTION=1               # Windows
+  python src/chat_web.py
+  ```
+  Same applies to `src/record_web.py`.
 
 To reproduce the benchmark:
 
@@ -249,7 +271,57 @@ should function identically.
 
 ---
 
-## 9. What this project demonstrates
+## 9. Production considerations
+
+This started as a local demo project; these are the changes made specifically to
+harden it toward "would survive being looked at by someone other than me":
+
+**Done:**
+- **Centralized config** (`src/config.py`) — every tunable that used to be a
+  scattered `os.environ.get(...)` call duplicated across five files is now one
+  validated dataclass, loaded once, with `.env` support (`python-dotenv`). Same
+  env var names as before — this changed *where* config lives, not how you set it.
+- **Automated tests + CI** (`tests/`, `.github/workflows/tests.yml`) — 42 tests
+  covering the confidence-gating decision logic, config loading, the Flask
+  endpoints, and — most importantly — a **regression test that locks in the
+  preprocessing finding from section 5** (asserts `pitch_shift`/`time_stretch`
+  are never called while the correction flags are off, even when detection
+  flags an outlier), so that real bug can't silently come back. Runs on a plain
+  GitHub Actions runner: every GPU/Ollama/Piper call is mocked, so CI needs no
+  CUDA wheels, no local model server, no microphone.
+- **Consistent error handling** (`src/web_common.py`) — both Flask apps return
+  `{"error": "..."}` JSON on 400/404/413/500 instead of Flask's default HTML
+  error pages; upload size is capped at 25MB (`MAX_CONTENT_LENGTH`) so an
+  oversized POST gets a clean rejection instead of an unbounded read.
+- **Retry with backoff on Ollama calls** — a connection failure before any
+  token has streamed gets a couple of retries (transient hiccups: Ollama
+  mid-model-swap, a cold-start race); once part of a reply has already reached
+  the caller, it stops retrying rather than risk duplicating output.
+- **Real WSGI server option** — Flask's dev server says not to use it in
+  production. `PRODUCTION=1` switches both web front ends to `waitress`
+  (Windows-compatible, unlike `gunicorn`) with no code changes needed.
+- **Log rotation** — `pipeline.log` is capped and rotated
+  (`RotatingFileHandler`) instead of growing forever.
+- **Linting in CI** (`ruff`) — the repo lints clean; enforced on every push.
+
+**Deliberately not done** (out of scope for a portfolio project, listed
+honestly rather than glossed over):
+- No authentication/authorization — anyone who can reach `127.0.0.1:5006` on
+  this machine can use it. Fine for a single-user local tool; not fine the
+  moment it's exposed beyond localhost.
+- No multi-tenant support — one conversation, one Whisper model instance, no
+  request queuing under concurrent load.
+- No packaging/installer (PyInstaller, an Electron shell, a signed release) —
+  "clone the repo and run three scripts" is the whole distribution story.
+- No containerization — Docker Desktop's GPU passthrough on Windows is its own
+  can of worms, and wasn't worth solving for a project that already runs
+  natively on the target machine.
+- No metrics/observability dashboard — logs are structured enough to grep, but
+  there's no latency-percentile tracking or alerting.
+
+---
+
+## 10. What this project demonstrates
 
 - Understanding of where failure modes are introduced in a real-time speech pipeline,
   and where to intercept them (preprocessing before STT, confidence check before LLM).

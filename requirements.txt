@@ -1,21 +1,21 @@
-# Local Voice Chatbot -- core dependencies
+# Local Voice Chatbot -- core dependencies (CPU-safe, no GPU wheels)
 # Pinned loosely (>=) since exact available patch versions drift; run
 # `pip freeze > requirements-frozen.txt` once everything works (Phase 7)
 # for a fully reproducible lockfile.
+#
+# Three requirements files, layered:
+#   requirements.txt      <- this file: everything needed to run on CPU
+#   requirements-gpu.txt   = requirements.txt + CUDA wheels for GPU Whisper
+#   requirements-dev.txt   = requirements.txt + test/lint tooling
+# CI installs requirements-dev.txt only -- it never needs the ~1.3GB of
+# CUDA wheels since all GPU-dependent code paths are mocked in tests.
 
 # --- STT ---
-# faster-whisper (CTranslate2 reimplementation of Whisper) needs a CUDA
-# runtime for GPU inference. On Linux the nvidia-cublas-cu12/cudnn-cu12
-# wheels below are enough on their own (CTranslate2's .so carries an
-# RPATH to them). On Windows there's no RPATH equivalent -- CTranslate2
-# resolves these via plain LoadLibrary, so src/cuda_dlls.py additionally
-# puts each wheel's bin/ directory on PATH at runtime, before
-# faster_whisper/ctranslate2 is ever imported. No full PyTorch+CUDA
-# install needed either way, which matters on a 4GB card where every
-# spare MB of VRAM counts.
+# faster-whisper (CTranslate2 reimplementation of Whisper) imports and runs
+# fine on CPU with no extra packages. GPU acceleration needs cuBLAS/cuDNN,
+# which live in requirements-gpu.txt -- see that file's comments for the
+# Windows-specific PATH wiring in src/cuda_dlls.py.
 faster-whisper>=1.0.3
-nvidia-cublas-cu12>=12.0        # GPU inference for faster-whisper
-nvidia-cudnn-cu12>=9.0          # GPU inference for faster-whisper
 
 # --- audio capture / VAD / DSP ---
 sounddevice>=0.4.6          # mic capture + playback (PortAudio bindings)
@@ -34,8 +34,13 @@ piper-tts>=1.2.0            # local, offline neural TTS
 rich>=13.7.0                # Phase 7 CLI (status panels, live transcription)
 matplotlib>=3.8.0           # Phase 5 benchmark chart
 
-# --- Phase 4 browser recorder (src/record_web.py) ---
+# --- web front ends (src/chat_web.py, src/record_web.py) ---
 flask>=3.0.0                 # tiny local server, binds to 127.0.0.1 only
+waitress>=3.0.0              # production WSGI server (Windows-compatible,
+                              # unlike gunicorn) -- used when PRODUCTION=1
 # audio decoding (webm/opus from the browser -> 16kHz mono wav) uses the
 # `av` package, already installed as a faster-whisper dependency -- no
 # extra entry needed here.
+
+# --- configuration ---
+python-dotenv>=1.0.0         # loads a local .env file, see .env.example

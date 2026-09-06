@@ -1,0 +1,16 @@
+# GPU acceleration for faster-whisper. Install with:
+#   pip install -r requirements-gpu.txt
+#
+# On Linux these two wheels are enough on their own -- CTranslate2's
+# shared library carries an RPATH pointing at them. On Windows there's no
+# RPATH equivalent; CTranslate2 resolves these via plain LoadLibrary, so
+# src/cuda_dlls.py additionally puts each wheel's bin/ directory on PATH
+# at runtime, before faster_whisper/ctranslate2 is ever imported (see
+# that module's docstring, and README section 8, for why
+# os.add_dll_directory() -- the usually-recommended fix -- doesn't work).
+#
+# ~1.3GB combined download. Skip this file entirely to run Whisper on CPU
+# only (fully supported, automatic fallback in pipeline.load_whisper_model()).
+-r requirements.txt
+nvidia-cublas-cu12>=12.0
+nvidia-cudnn-cu12>=9.0

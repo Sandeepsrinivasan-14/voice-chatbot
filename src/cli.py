@@ -127,11 +127,9 @@ def run_cli():
     try:
         while True:
             console.print("[dim]Listening...[/dim]")
-            t0 = time.time()
             audio = pipeline.capture_audio()
             if audio is None:
                 continue
-            capture_s = time.time() - t0
 
             processed_audio, report = pipeline.normalize_audio(audio, pipeline.SAMPLE_RATE)
 

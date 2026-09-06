@@ -29,8 +29,10 @@ from flask import Flask, jsonify, request, send_from_directory
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from browser_audio import decode_browser_audio  # noqa: E402
+from config import CONFIG  # noqa: E402
+from web_common import register_error_handlers, run_app  # noqa: E402
 
-SAMPLE_RATE = 16000
+SAMPLE_RATE = CONFIG.sample_rate
 DEFAULT_WORDS = ["yes", "no", "stop", "help", "start"]
 MODULATIONS = ["normal", "whispered", "shouted", "slow", "fast"]
 
@@ -41,6 +43,8 @@ STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web_recor
 MIN_CLIP_SECONDS = 0.3
 
 app = Flask(__name__, static_folder=None)
+app.config["MAX_CONTENT_LENGTH"] = CONFIG.max_upload_bytes
+register_error_handlers(app)
 
 
 def load_manifest_rows() -> list[dict]:
@@ -125,8 +129,6 @@ def health():
 
 if __name__ == "__main__":
     os.makedirs(OUT_DIR, exist_ok=True)
-    port = int(os.environ.get("RECORD_WEB_PORT", 5005))
-    print(f"Voice Sample Recorder running at http://localhost:{port}")
     print(f"Saving into: {OUT_DIR}")
     print("Everything here stays on this machine -- close the tab/Ctrl+C to stop.")
-    app.run(host="127.0.0.1", port=port, debug=False)
+    run_app(app, host="127.0.0.1", port=CONFIG.record_web_port, name="record_web")

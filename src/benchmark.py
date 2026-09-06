@@ -31,6 +31,7 @@ from cuda_dlls import ensure_cuda_dlls_on_path  # noqa: E402
 
 ensure_cuda_dlls_on_path()  # must run before faster_whisper/ctranslate2 is ever imported
 
+from config import CONFIG  # noqa: E402
 from preprocessing import normalize_audio  # noqa: E402
 
 MANIFEST_PATH = os.path.join("data", "test_samples", "manifest.csv")
@@ -79,7 +80,9 @@ def run_benchmark():
     os.makedirs(RESULTS_DIR, exist_ok=True)
 
     try:
-        model = WhisperModel("small", device="cuda", compute_type="int8_float16")
+        model = WhisperModel(
+            CONFIG.whisper_model_size, device="cuda", compute_type=CONFIG.whisper_compute_type_gpu
+        )
         # Construction alone doesn't prove the GPU path works on Windows --
         # missing cuBLAS/cuDNN DLLs only surface on first real inference.
         import numpy as _np
@@ -87,7 +90,9 @@ def run_benchmark():
         print("[benchmark] Using GPU for faster-whisper.")
     except Exception as exc:
         print(f"[benchmark] GPU unavailable ({exc}), using CPU.")
-        model = WhisperModel("small", device="cpu", compute_type="int8")
+        model = WhisperModel(
+            CONFIG.whisper_model_size, device="cpu", compute_type=CONFIG.whisper_compute_type_cpu
+        )
 
     results = []  # one dict per (file, condition)
     for i, row in enumerate(rows, 1):

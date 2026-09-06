@@ -1,0 +1,9 @@
+# Test/lint tooling. Install with:
+#   pip install -r requirements-dev.txt
+#
+# Deliberately does NOT pull in requirements-gpu.txt -- the test suite
+# mocks every GPU-dependent call (see tests/conftest.py), so CI never
+# needs the ~1.3GB of CUDA wheels.
+-r requirements.txt
+pytest>=8.0.0
+ruff>=0.6.0

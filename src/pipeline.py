@@ -20,12 +20,12 @@ from __future__ import annotations
 
 import json
 import logging
+import logging.handlers
 import os
 import queue
 import subprocess
 import sys
 import time
-import wave
 from dataclasses import dataclass
 
 import numpy as np
@@ -39,67 +39,60 @@ from cuda_dlls import ensure_cuda_dlls_on_path  # noqa: E402
 
 ensure_cuda_dlls_on_path()  # must run before faster_whisper/ctranslate2 is ever imported
 
-from confidence_check import DEFAULT_CONFIDENCE_THRESHOLD, Decision, evaluate  # noqa: E402
+from config import CONFIG  # noqa: E402
+from confidence_check import Decision, evaluate  # noqa: E402
 from preprocessing import normalize_audio  # noqa: E402
 
 # --------------------------------------------------------------------
-# Config -- tune these for your hardware (see README section 5/6)
+# Config -- these are aliases onto the single source of truth in
+# config.py (kept as module attributes here since cli.py, chat_web.py,
+# and benchmark.py already reference e.g. `pipeline.OLLAMA_URL` --
+# changing *where the value is read from* shouldn't require touching
+# every call site). To actually change a value, edit config.py / your
+# .env, not these lines.
 # --------------------------------------------------------------------
-SAMPLE_RATE = 16000  # required by both webrtcvad and whisper
-FRAME_MS = 30
+SAMPLE_RATE = CONFIG.sample_rate  # required by both webrtcvad and whisper
+FRAME_MS = CONFIG.frame_ms
 FRAME_SAMPLES = int(SAMPLE_RATE * FRAME_MS / 1000)  # 480 samples/frame
-VAD_AGGRESSIVENESS = 2  # 0 (permissive) .. 3 (strict about what counts as speech)
+VAD_AGGRESSIVENESS = CONFIG.vad_aggressiveness  # 0 (permissive) .. 3 (strict)
 SILENCE_FRAMES_TO_STOP = int(800 / FRAME_MS)   # ~0.8s trailing silence ends capture
 MIN_SPEECH_FRAMES = int(150 / FRAME_MS)         # ignore blips shorter than this
-MAX_RECORD_SECONDS = 15
+MAX_RECORD_SECONDS = CONFIG.max_record_seconds
 PRE_SPEECH_PADDING_FRAMES = 10                   # ~300ms of audio kept before trigger
 
-# faster-whisper: "small" fits comfortably on a 4GB GPU alongside a small
-# quantized Ollama model. int8_float16 halves VRAM vs float16 with a
-# negligible accuracy hit -- worth it when VRAM is the binding constraint.
-WHISPER_MODEL_SIZE = os.environ.get("WHISPER_MODEL_SIZE", "small")
-WHISPER_COMPUTE_TYPE_GPU = "int8_float16"
-WHISPER_COMPUTE_TYPE_CPU = "int8"
-BEAM_SIZE_FAST = 1     # first-pass greedy-ish decode, fast
-BEAM_SIZE_RETRY = 5    # slower, wider search -- only used when confidence is low
+WHISPER_MODEL_SIZE = CONFIG.whisper_model_size
+WHISPER_COMPUTE_TYPE_GPU = CONFIG.whisper_compute_type_gpu
+WHISPER_COMPUTE_TYPE_CPU = CONFIG.whisper_compute_type_cpu
+BEAM_SIZE_FAST = CONFIG.beam_size_fast
+BEAM_SIZE_RETRY = CONFIG.beam_size_retry
 
-OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2:3b")
+OLLAMA_URL = CONFIG.ollama_url
+OLLAMA_MODEL = CONFIG.ollama_model
 
-def _default_piper_executable() -> str:
-    """piper-tts installs a `piper`/`piper.exe` console script alongside
-    the Python interpreter it was pip-installed into (venv/Scripts on
-    Windows, venv/bin on Linux/Mac). That directory is only on PATH if
-    the venv was `activate`d in the current shell -- resolving relative
-    to sys.executable means it works either way, without relying on the
-    caller having activated anything.
-    """
-    candidate = os.path.join(
-        os.path.dirname(sys.executable), "piper.exe" if os.name == "nt" else "piper"
-    )
-    return candidate if os.path.exists(candidate) else "piper"
+PIPER_EXECUTABLE = CONFIG.piper_executable
+PIPER_MODEL_PATH = CONFIG.piper_model_path
 
-
-PIPER_EXECUTABLE = os.environ.get("PIPER_EXECUTABLE", _default_piper_executable())
-PIPER_MODEL_PATH = os.environ.get(
-    "PIPER_MODEL_PATH", os.path.join("models", "piper", "en_US-lessac-medium.onnx")
-)
-
-LOG_DIR = "logs"
-LOG_FILE = os.path.join(LOG_DIR, "pipeline.log")
+LOG_DIR = CONFIG.log_dir
+LOG_FILE = CONFIG.pipeline_log_path
 
 logger = logging.getLogger("voice_chatbot.pipeline")
 
 
 def setup_logging() -> None:
     os.makedirs(LOG_DIR, exist_ok=True)
+    # RotatingFileHandler instead of a plain FileHandler: a chatbot left
+    # running for a while (or a busy chat_web.py server) would otherwise
+    # grow pipeline.log without bound. Caps it at a few rotated files.
+    file_handler = logging.handlers.RotatingFileHandler(
+        LOG_FILE,
+        maxBytes=CONFIG.log_max_bytes,
+        backupCount=CONFIG.log_backup_count,
+        encoding="utf-8",
+    )
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        handlers=[
-            logging.FileHandler(LOG_FILE, encoding="utf-8"),
-            logging.StreamHandler(sys.stdout),
-        ],
+        handlers=[file_handler, logging.StreamHandler(sys.stdout)],
     )
 
 
@@ -306,32 +299,53 @@ def generate_response(prompt: str, model: str = OLLAMA_MODEL, on_token=None) -> 
     """Streams a response from a local Ollama server. `on_token`, if
     given, is called with each incremental chunk (used by the CLI to
     print/speak as it arrives instead of waiting for the full reply).
+
+    Retries a couple of times on a connection failure that happens before
+    any token was streamed (a transient hiccup -- Ollama mid-model-swap,
+    a brief cold-start race) -- but never retries once part of the reply
+    has already reached `on_token`, since replaying from scratch at that
+    point would duplicate output the caller has already acted on.
     """
     url = f"{OLLAMA_URL}/api/generate"
     payload = {"model": model, "prompt": prompt, "system": SYSTEM_PROMPT, "stream": True}
-    full_text = []
-    try:
-        # 180s headroom covers Ollama's one-time cold-load of model weights
-        # into memory on the first call; warm calls return in a couple seconds.
-        with requests.post(url, json=payload, stream=True, timeout=180) as resp:
-            resp.raise_for_status()
-            for line in resp.iter_lines():
-                if not line:
-                    continue
-                chunk = json.loads(line)
-                token = chunk.get("response", "")
-                if token:
-                    full_text.append(token)
-                    if on_token:
-                        on_token(token)
-                if chunk.get("done"):
-                    break
-    except requests.exceptions.ConnectionError as exc:
-        raise RuntimeError(
-            "Could not reach Ollama at "
-            f"{OLLAMA_URL}. Is `ollama serve` running? ({exc})"
-        ) from exc
-    return "".join(full_text).strip()
+    last_exc: Exception | None = None
+
+    for attempt in range(1, CONFIG.ollama_max_retries + 2):  # +2: first try + N retries
+        full_text: list[str] = []
+        try:
+            # ollama_timeout_s headroom covers Ollama's one-time cold-load of
+            # model weights into memory on the first call; warm calls return
+            # in a couple seconds.
+            with requests.post(
+                url, json=payload, stream=True, timeout=CONFIG.ollama_timeout_s
+            ) as resp:
+                resp.raise_for_status()
+                for line in resp.iter_lines():
+                    if not line:
+                        continue
+                    chunk = json.loads(line)
+                    token = chunk.get("response", "")
+                    if token:
+                        full_text.append(token)
+                        if on_token:
+                            on_token(token)
+                    if chunk.get("done"):
+                        break
+            return "".join(full_text).strip()
+        except requests.exceptions.ConnectionError as exc:
+            last_exc = exc
+            if full_text or attempt > CONFIG.ollama_max_retries:
+                break
+            logger.warning(
+                "Ollama connection failed (attempt %d/%d), retrying...",
+                attempt,
+                CONFIG.ollama_max_retries + 1,
+            )
+            time.sleep(0.5 * attempt)
+
+    raise RuntimeError(
+        f"Could not reach Ollama at {OLLAMA_URL}. Is `ollama serve` running? ({last_exc})"
+    ) from last_exc
 
 
 # --------------------------------------------------------------------

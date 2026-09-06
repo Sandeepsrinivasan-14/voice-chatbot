@@ -6,6 +6,10 @@ data/test_samples/*.wav
 logs/*.log
 *.egg-info/
 .pytest_cache/
+.ruff_cache/
+
+# local machine-specific config -- copy .env.example instead
+.env
 
 # large model binaries -- downloaded locally, not committed
 models/piper/*.onnx

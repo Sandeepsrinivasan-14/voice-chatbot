@@ -34,15 +34,22 @@ from __future__ import annotations
 import csv
 import logging
 import os
-import time
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from config import CONFIG  # noqa: E402
+
 logger = logging.getLogger("voice_chatbot.confidence_check")
 
-DEFAULT_CONFIDENCE_THRESHOLD = -0.6
-LOG_PATH = os.path.join("logs", "confidence_log.csv")
+# Module-level aliases onto config.py's single source of truth (see that
+# module's docstring). Kept as attributes here -- not inlined at each call
+# site -- specifically so tests can `monkeypatch.setattr(confidence_check,
+# "LOG_PATH", tmp_path / "test.csv")` to avoid writing to the real log.
+DEFAULT_CONFIDENCE_THRESHOLD = CONFIG.confidence_threshold
+LOG_PATH = CONFIG.confidence_log_path
 _CSV_HEADER = [
     "timestamp",
     "text",

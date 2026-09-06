@@ -28,21 +28,25 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 
 import requests
-import soundfile as sf
 from flask import Flask, Response, jsonify, request, send_from_directory
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from browser_audio import decode_browser_audio  # noqa: E402
+from config import CONFIG  # noqa: E402
 import pipeline  # noqa: E402  (also wires up cuda_dlls before faster_whisper loads)
 from confidence_check import Decision  # noqa: E402
 from preprocessing import normalize_audio  # noqa: E402
+from web_common import register_error_handlers, run_app  # noqa: E402
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web_chat")
 MAX_HISTORY_MESSAGES = 12  # ~6 exchanges of context sent back to Ollama each turn
 
 app = Flask(__name__, static_folder=None)
+app.config["MAX_CONTENT_LENGTH"] = CONFIG.max_upload_bytes
+register_error_handlers(app)
 _whisper_model = None
 _whisper_device = None
 
@@ -134,27 +138,46 @@ def respond_endpoint():
     messages.append({"role": "user", "content": user_message})
 
     def generate():
-        try:
-            with requests.post(
-                f"{pipeline.OLLAMA_URL}/api/chat",
-                json={"model": pipeline.OLLAMA_MODEL, "messages": messages, "stream": True},
-                stream=True,
-                timeout=180,
-            ) as resp:
-                resp.raise_for_status()
-                for line in resp.iter_lines():
-                    if not line:
-                        continue
-                    chunk = json.loads(line)
-                    token = chunk.get("message", {}).get("content", "")
-                    if token:
-                        yield token
-                    if chunk.get("done"):
-                        break
-        except requests.exceptions.ConnectionError:
-            yield f"\n[Could not reach Ollama at {pipeline.OLLAMA_URL} -- is `ollama serve` running?]"
-        except Exception as exc:  # noqa: BLE001 -- surface any failure as visible chat text
-            yield f"\n[Error talking to Ollama: {exc}]"
+        # Retries a connection failure that happens before any token was
+        # yielded (a transient hiccup) -- same policy as, and for the same
+        # reason as, pipeline.generate_response()'s retry logic: once a
+        # token has already reached the client it's too late to restart
+        # without duplicating output.
+        last_exc: Exception | None = None
+        for attempt in range(1, CONFIG.ollama_max_retries + 2):
+            yielded_any = False
+            try:
+                with requests.post(
+                    f"{pipeline.OLLAMA_URL}/api/chat",
+                    json={"model": pipeline.OLLAMA_MODEL, "messages": messages, "stream": True},
+                    stream=True,
+                    timeout=CONFIG.ollama_timeout_s,
+                ) as resp:
+                    resp.raise_for_status()
+                    for line in resp.iter_lines():
+                        if not line:
+                            continue
+                        chunk = json.loads(line)
+                        token = chunk.get("message", {}).get("content", "")
+                        if token:
+                            yielded_any = True
+                            yield token
+                        if chunk.get("done"):
+                            break
+                return
+            except requests.exceptions.ConnectionError as exc:
+                last_exc = exc
+                if yielded_any or attempt > CONFIG.ollama_max_retries:
+                    break
+                time.sleep(0.5 * attempt)
+            except Exception as exc:  # noqa: BLE001 -- surface any failure as visible chat text
+                yield f"\n[Error talking to Ollama: {exc}]"
+                return
+
+        yield (
+            f"\n[Could not reach Ollama at {pipeline.OLLAMA_URL} -- "
+            f"is `ollama serve` running? ({last_exc})]"
+        )
 
     return Response(generate(), mimetype="text/plain")
 
@@ -175,9 +198,7 @@ def tts_endpoint():
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("CHAT_WEB_PORT", 5006))
-    print(f"Voice Chatbot running at http://localhost:{port}")
     print("Loading faster-whisper on first request (not at startup) -- the")
     print("first message you send will take a moment longer than the rest.")
     print("Everything here stays on this machine -- close the tab/Ctrl+C to stop.")
-    app.run(host="127.0.0.1", port=port, debug=False, threaded=True)
+    run_app(app, host="127.0.0.1", port=CONFIG.chat_web_port, name="chat_web")
