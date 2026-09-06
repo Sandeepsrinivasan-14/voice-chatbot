@@ -1,2 +1,28 @@
-# Filled in during Phase 1 of voice-chatbot-build-guide.md
-# Core: faster-whisper, sounddevice, numpy, librosa, soundfile
+# Local Voice Chatbot -- core dependencies
+# Pinned loosely (>=) since exact available patch versions drift; run
+# `pip freeze > requirements-frozen.txt` once everything works (Phase 7)
+# for a fully reproducible lockfile.
+
+# --- STT ---
+# faster-whisper (CTranslate2 reimplementation of Whisper) brings its own
+# CUDA runtime via the nvidia-cublas-cu12 / nvidia-cudnn-cu12 wheels that
+# get pulled in automatically -- no separate PyTorch+CUDA install needed,
+# which matters on a 4GB card where every spare MB of VRAM counts.
+faster-whisper>=1.0.3
+
+# --- audio capture / VAD / DSP ---
+sounddevice>=0.4.6          # mic capture + playback (PortAudio bindings)
+numpy>=1.26.0
+librosa>=0.10.2             # normalization, pitch/speed analysis
+soundfile>=0.12.1           # wav read/write
+webrtcvad-wheels>=2.0.11.post1   # prebuilt Windows wheels of Google's WebRTC VAD
+
+# --- LLM client ---
+requests>=2.31.0            # talks to Ollama's local REST API (localhost:11434)
+
+# --- TTS ---
+piper-tts>=1.2.0            # local, offline neural TTS
+
+# --- CLI / reporting ---
+rich>=13.7.0                # Phase 7 CLI (status panels, live transcription)
+matplotlib>=3.8.0           # Phase 5 benchmark chart

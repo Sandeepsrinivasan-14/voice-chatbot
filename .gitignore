@@ -6,3 +6,14 @@ data/test_samples/*.wav
 logs/*.log
 *.egg-info/
 .pytest_cache/
+
+# large model binaries -- downloaded locally, not committed
+models/piper/*.onnx
+models/piper/*.onnx.json
+logs/*.csv
+logs/_*.wav
+data/results/*.png
+
+# editor/tool-specific state, not project content
+.serena/
+
