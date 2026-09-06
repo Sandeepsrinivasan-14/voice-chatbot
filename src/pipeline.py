@@ -35,6 +35,10 @@ import soundfile as sf
 import webrtcvad
 
 sys.path.insert(0, os.path.dirname(__file__))
+from cuda_dlls import ensure_cuda_dlls_on_path  # noqa: E402
+
+ensure_cuda_dlls_on_path()  # must run before faster_whisper/ctranslate2 is ever imported
+
 from confidence_check import DEFAULT_CONFIDENCE_THRESHOLD, Decision, evaluate  # noqa: E402
 from preprocessing import normalize_audio  # noqa: E402
 
@@ -283,13 +287,28 @@ def transcribe_with_confidence(model, audio: np.ndarray):
 # --------------------------------------------------------------------
 # 3. LLM (Ollama, local server on localhost:11434)
 # --------------------------------------------------------------------
+# Without guidance, instruction-tuned models default to chat-app-style
+# answers: numbered lists, headers, multi-paragraph explanations. That's
+# fine on a screen and actively bad here -- every response gets read
+# aloud by Piper, so a 4-point numbered list becomes a wall of spoken
+# text with no visual structure to lean on. This system prompt is what
+# actually fixes that (found while comparing models: swapping models
+# didn't fix verbosity, this did -- see README known limitations).
+SYSTEM_PROMPT = (
+    "You are a helpful voice assistant. Your replies are converted to "
+    "speech and spoken aloud, so keep answers short: 1-3 plain "
+    "conversational sentences. Never use lists, headers, markdown, or "
+    "any formatting that only makes sense in writing."
+)
+
+
 def generate_response(prompt: str, model: str = OLLAMA_MODEL, on_token=None) -> str:
     """Streams a response from a local Ollama server. `on_token`, if
     given, is called with each incremental chunk (used by the CLI to
     print/speak as it arrives instead of waiting for the full reply).
     """
     url = f"{OLLAMA_URL}/api/generate"
-    payload = {"model": model, "prompt": prompt, "stream": True}
+    payload = {"model": model, "prompt": prompt, "system": SYSTEM_PROMPT, "stream": True}
     full_text = []
     try:
         # 180s headroom covers Ollama's one-time cold-load of model weights

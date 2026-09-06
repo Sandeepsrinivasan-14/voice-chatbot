@@ -27,6 +27,10 @@ import matplotlib.pyplot as plt
 import soundfile as sf
 
 sys.path.insert(0, os.path.dirname(__file__))
+from cuda_dlls import ensure_cuda_dlls_on_path  # noqa: E402
+
+ensure_cuda_dlls_on_path()  # must run before faster_whisper/ctranslate2 is ever imported
+
 from preprocessing import normalize_audio  # noqa: E402
 
 MANIFEST_PATH = os.path.join("data", "test_samples", "manifest.csv")

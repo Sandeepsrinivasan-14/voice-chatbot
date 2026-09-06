@@ -80,6 +80,16 @@ This mirrors how production speech systems actually handle uncertainty — the g
 to force a model to always output *something*, it's to know when not to trust its own
 output.
 
+**Response shaping for speech (`src/pipeline.py::SYSTEM_PROMPT`)**
+- Worth calling out separately because it wasn't obvious until testing surfaced it:
+  swapping LLMs did nothing for output quality, but a system prompt did. Without
+  guidance, an instruction-tuned model defaults to chat-app formatting — numbered
+  steps, headers, multi-paragraph answers. That's fine on a screen and actively bad
+  here, since every response gets read aloud by Piper with no visual structure to
+  lean on. A short system prompt ("keep answers to 1-3 spoken sentences, no lists or
+  markdown") fixed this immediately, on every model tested. Lesson: for a voice
+  interface, prompt-level response shaping matters as much as model choice.
+
 ---
 
 ## 5. Benchmark results
@@ -120,7 +130,10 @@ venv\Scripts\activate          # Windows
 pip install -r requirements.txt
 
 # Install and start Ollama, pull the local model
-ollama pull <model-name>
+# (llama3.2:3b chosen after head-to-head testing against qwen2.5:3b-instruct --
+# comparable size/speed, but more reliably correct on basic arithmetic and reads
+# more naturally aloud; either fits a 4GB GPU alongside faster-whisper)
+ollama pull llama3.2:3b
 
 # Verify everything is installed correctly
 python verify_setup.py
@@ -155,7 +168,26 @@ should function identically.
   speech data — extreme modulation edge cases may still reduce accuracy somewhat.
 - Confidence thresholds were tuned on a personal voice sample set; a different
   speaker's voice profile may need threshold re-tuning.
-- Latency depends on local GPU capability — tested and optimized on [your GPU model].
+- Latency depends on local GPU capability — tested on an RTX 3050 Laptop (4GB VRAM):
+  faster-whisper `small` (int8_float16) + a 3B-parameter Ollama model both run on GPU
+  simultaneously, peaking around 2.6GB VRAM used.
+- **Windows-specific gotcha (worth documenting because it cost real debugging time):**
+  `faster-whisper`'s CTranslate2 backend needs cuBLAS/cuDNN, but the
+  `nvidia-cublas-cu12`/`nvidia-cudnn-cu12` pip wheels that provide them on Linux via
+  RPATH don't work the same way on Windows — CTranslate2 resolves them with a plain
+  `LoadLibrary` call, so `os.add_dll_directory()` (the usually-recommended fix) is a
+  silent no-op here. `src/cuda_dlls.py` fixes this by putting each wheel's `bin/`
+  directory directly on `PATH` before `faster_whisper` is ever imported. Without it,
+  GPU construction succeeds but the *first inference call* fails with
+  `Library cublas64_12.dll is not found` — which is also why every model-load path in
+  this repo (`pipeline.py`, `verify_setup.py`, `benchmark.py`) does a cheap smoke-test
+  transcription before trusting the GPU device, not just a try/except around
+  construction.
+- Preprocessing's pitch/speed detection goes through numba-JIT'd librosa internals.
+  Under real memory pressure (running Whisper + an LLM + TTS together on a 16GB
+  machine) that JIT compile has been observed to throw a transient `MemoryError`.
+  Every preprocessing step therefore fails closed — it logs a warning and passes
+  audio through unmodified rather than crashing the turn (see `preprocessing.py`).
 
 ---
 

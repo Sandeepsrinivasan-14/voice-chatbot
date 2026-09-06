@@ -4,11 +4,18 @@
 # for a fully reproducible lockfile.
 
 # --- STT ---
-# faster-whisper (CTranslate2 reimplementation of Whisper) brings its own
-# CUDA runtime via the nvidia-cublas-cu12 / nvidia-cudnn-cu12 wheels that
-# get pulled in automatically -- no separate PyTorch+CUDA install needed,
-# which matters on a 4GB card where every spare MB of VRAM counts.
+# faster-whisper (CTranslate2 reimplementation of Whisper) needs a CUDA
+# runtime for GPU inference. On Linux the nvidia-cublas-cu12/cudnn-cu12
+# wheels below are enough on their own (CTranslate2's .so carries an
+# RPATH to them). On Windows there's no RPATH equivalent -- CTranslate2
+# resolves these via plain LoadLibrary, so src/cuda_dlls.py additionally
+# puts each wheel's bin/ directory on PATH at runtime, before
+# faster_whisper/ctranslate2 is ever imported. No full PyTorch+CUDA
+# install needed either way, which matters on a 4GB card where every
+# spare MB of VRAM counts.
 faster-whisper>=1.0.3
+nvidia-cublas-cu12>=12.0        # GPU inference for faster-whisper
+nvidia-cudnn-cu12>=9.0          # GPU inference for faster-whisper
 
 # --- audio capture / VAD / DSP ---
 sounddevice>=0.4.6          # mic capture + playback (PortAudio bindings)
