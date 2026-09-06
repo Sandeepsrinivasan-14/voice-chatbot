@@ -104,24 +104,51 @@ output.
 
 ## 5. Benchmark results
 
-Recorded my own voice saying a fixed set of command words across 5 modulations
-(normal, whispered, shouted, slow, fast), then ran each sample through the pipeline
-with and without the preprocessing layer.
+Recorded my own voice saying 5 command words ("yes", "no", "stop", "help", "start")
+across 5 modulations (normal, whispered, shouted, slow, fast) — 25 clips — then ran
+every clip through faster-whisper twice: once raw, once with the preprocessing layer
+applied, everything else identical.
 
-| Modulation | Raw Whisper accuracy | With preprocessing | Improvement |
+| Modulation | Raw Whisper accuracy | With preprocessing | Delta |
 |---|---|---|---|
-| Normal | _fill in_ | _fill in_ | _fill in_ |
-| Whispered | _fill in_ | _fill in_ | _fill in_ |
-| Shouted | _fill in_ | _fill in_ | _fill in_ |
-| Slow | _fill in_ | _fill in_ | _fill in_ |
-| Fast | _fill in_ | _fill in_ | _fill in_ |
-| **Overall** | _fill in_ | _fill in_ | _fill in_ |
+| Normal | 100.0% | 100.0% | +0.0 |
+| Whispered | 100.0% | 100.0% | +0.0 |
+| Shouted | 100.0% | 100.0% | +0.0 |
+| Slow | 80.0% | 80.0% | +0.0 |
+| Fast | 100.0% | 100.0% | +0.0 |
+| **Overall** | **96.0%** | **96.0%** | **+0.0** |
 
 Full results: `data/results/benchmark_results.csv`
 Chart: `data/results/accuracy_comparison.png`
 
-*(Fill this table in with your actual numbers from `python src/benchmark.py` before
-submitting — this table is the single most persuasive artifact in the whole project.)*
+**This is not the result I expected, and it's the more interesting one.** The first
+real run (before the fix described below) showed preprocessing *dropping* accuracy
+from 96% to 48% — actively destroying transcriptions ("Stop" → "So...", "Help" →
+"L L L", one clip came back empty). I root-caused it with a series of controlled
+diagnostic re-runs (isolating volume-only vs. +pitch vs. +speed) rather than guessing:
+
+- **Speed "correction" was the dominant damage.** It estimates speaking rate from
+  onset density, which needs several syllables across time to mean anything. A
+  single isolated command word gives ~1 onset, so the "rate" mostly reflects how
+  much silence padding surrounds the word in the recording, not how fast it was
+  actually spoken. A clip I said *fast* got misread as extremely slow and
+  time-stretched in the wrong direction into an empty transcription.
+- **Pitch correction was a smaller second offender** — on a short, consonant-heavy
+  word, the pitch tracker locked onto a plosive burst as if it were the vocal
+  fundamental and "corrected" a pitch problem that didn't exist.
+- **Volume/RMS normalization alone matched raw Whisper exactly** (96%, same single
+  failure) — neutral to good, never harmful.
+
+Given that evidence, `src/preprocessing.py` now disables pitch and speed
+*correction* by default (`ENABLE_PITCH_CORRECTION` / `ENABLE_SPEED_CORRECTION` =
+`False`) while still running detection/logging — the numbers above are with that fix
+applied, which is why every row shows a flat +0.0 delta rather than a regression.
+Raw Whisper turns out to already be quite robust to modulation on short command
+words; the real remaining value here is the confidence-aware retry/reject layer
+(`confidence_check.py`), which is a separate mechanism from preprocessing and isn't
+captured by this before/after table. Pitch/speed correction might still be worth
+revisiting for longer, continuous multi-word utterances, where onset density would
+have a much larger sample to estimate from — that's untested here.
 
 ---
 
@@ -174,8 +201,11 @@ should function identically.
 
 ## 8. Known limitations
 
-- Preprocessing improves robustness but does not fully replace training on modulated
-  speech data — extreme modulation edge cases may still reduce accuracy somewhat.
+- Pitch and speed *correction* are implemented but disabled by default
+  (`ENABLE_PITCH_CORRECTION`/`ENABLE_SPEED_CORRECTION` in `preprocessing.py`) —
+  benchmarking against real recordings showed they hurt accuracy on short, isolated
+  command words (see section 5). Detection/logging still runs; only the audio
+  modification is gated off. This is a real, evidence-based finding, not a stub.
 - Confidence thresholds were tuned on a personal voice sample set; a different
   speaker's voice profile may need threshold re-tuning.
 - Latency depends on local GPU capability — tested on an RTX 3050 Laptop (4GB VRAM):

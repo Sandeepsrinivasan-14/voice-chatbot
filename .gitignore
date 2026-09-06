@@ -12,7 +12,9 @@ models/piper/*.onnx
 models/piper/*.onnx.json
 logs/*.csv
 logs/_*.wav
-data/results/*.png
+# NOTE: data/results/accuracy_comparison.png and benchmark_results.csv are
+# NOT ignored -- they're the real benchmark evidence (README section 5),
+# not throwaway output, and are committed intentionally.
 
 # editor/tool-specific state, not project content
 .serena/

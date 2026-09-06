@@ -1,0 +1,26 @@
+filename,expected_word,modulation,raw_transcription,raw_correct,preprocessed_transcription,preprocessed_correct
+yes_normal.wav,yes,normal,Yes.,True,Yes.,True
+yes_whispered.wav,yes,whispered,Yes.,True,Yes.,True
+yes_shouted.wav,yes,shouted,Yes!,True,Yes!,True
+yes_slow.wav,yes,slow,Yes.,True,Yes.,True
+yes_fast.wav,yes,fast,Yes.,True,Yes.,True
+no_normal.wav,no,normal,No.,True,No.,True
+no_whispered.wav,no,whispered,No. No.,True,No. No.,True
+no_shouted.wav,no,shouted,No!,True,No!,True
+no_slow.wav,no,slow,No.,True,No.,True
+no_fast.wav,no,fast,No. No!,True,No. No!,True
+stop_normal.wav,stop,normal,Stop.,True,Stop.,True
+stop_whispered.wav,stop,whispered,Stop.,True,Stop.,True
+stop_shouted.wav,stop,shouted,Stop!,True,Stop!,True
+stop_slow.wav,stop,slow,Stop!,True,Stop!,True
+stop_fast.wav,stop,fast,Stop!,True,Stop!,True
+help_normal.wav,help,normal,Help!,True,Help!,True
+help_whispered.wav,help,whispered,Help!,True,Help!,True
+help_shouted.wav,help,shouted,Help!,True,Help!,True
+help_slow.wav,help,slow,L,False,L,False
+help_fast.wav,help,fast,Help!,True,Help!,True
+start_normal.wav,start,normal,Start.,True,Start.,True
+start_whispered.wav,start,whispered,Start!,True,Start!,True
+start_shouted.wav,start,shouted,Start.,True,Start.,True
+start_slow.wav,start,slow,Start!,True,Start!,True
+start_fast.wav,start,fast,Start!,True,Start!,True

@@ -22,6 +22,42 @@ None of this makes Whisper *unable* to transcribe modulated speech -- it
 makes the input closer, acoustically, to "normal" speech, which is the
 regime the model was actually trained on. That's the whole strategy here:
 we don't fix the model, we shrink the gap it has to generalize across.
+
+UPDATE, post-benchmark (see README section 5 / data/results): on this
+project's own recorded voice samples, actually *applying* the pitch and
+speed corrections made accuracy dramatically WORSE (48% vs. 96% raw),
+not better. Root cause, isolated with a series of controlled diagnostic
+re-runs (volume-only vs. +pitch vs. +speed):
+
+  - Speed "correction" was the dominant damage. Onset-density-based
+    speaking-rate estimation needs several syllables across time to mean
+    anything -- a single isolated command word gives ~1 onset, so the
+    "rate" is dominated by how much silence padding surrounds the word
+    in the recording, not how fast it was actually spoken. `start_fast`
+    (genuinely spoken fast) was misclassified as extremely SLOW
+    (ratio=0.22) and time-stretched in the wrong direction into an empty
+    transcription. Every modulation, including `normal`, got flagged
+    "slow" and mangled -- the signal was just noise for this input shape.
+  - Pitch correction was a smaller but real second offender: on a short
+    plosive-heavy word (`start`, fast), pyin locked onto a consonant
+    burst as if it were the vocal fundamental (766 Hz -- clearly not a
+    real pitch for this voice) and "corrected" a word that had no actual
+    pitch problem.
+  - Volume/RMS normalization alone matched raw Whisper's accuracy
+    exactly (96%, same single failure) -- neutral to good, never harmful.
+
+Conclusion: for short, isolated command words specifically, pitch-shift
+and time-stretch as implemented here are not trustworthy enough to apply
+blindly, so ENABLE_PITCH_CORRECTION and ENABLE_SPEED_CORRECTION below
+default to False -- detection/logging still runs (useful signal, e.g.
+for confidence_check.py diagnostics), the audio just isn't modified
+based on it. This is exactly the kind of thing the benchmark exists to
+catch: a plausible-sounding preprocessing idea that a real accuracy
+measurement proved was actively hurting the metric it was meant to help.
+Longer, continuous multi-word utterances would give onset-density a much
+larger sample to estimate from and might genuinely benefit from these
+corrections -- that's untested here and would need its own benchmark
+before being turned back on.
 """
 
 from __future__ import annotations
@@ -46,6 +82,13 @@ PITCH_REFERENCE_HZ = 165.0        # rough neutral midpoint we correct toward
 NORMAL_SPEECH_RATE = 3.5          # syllables/sec-ish proxy, see estimate below
 SPEED_RATIO_LOW = 0.75            # below this fraction of normal -> "slow"
 SPEED_RATIO_HIGH = 1.35           # above this fraction of normal -> "fast"
+
+# Both default to False -- see the module docstring's "UPDATE, post-benchmark"
+# section. Detection/logging always runs regardless of these flags; only the
+# actual audio-modifying step (pitch_shift / time_stretch) is gated. Flip to
+# True only after re-validating with your own data/results/benchmark_results.csv.
+ENABLE_PITCH_CORRECTION = False
+ENABLE_SPEED_CORRECTION = False
 
 
 @dataclass
@@ -125,11 +168,17 @@ def _detect_and_correct_pitch(
             # an unnatural register -- partial correction, not a full snap
             semitone_shift = float(np.clip(semitone_shift, -6, 6))
             report.pitch_shift_semitones = semitone_shift
-            report.notes.append(
-                f"pitch outlier ({median_pitch:.0f} Hz) -> shifting "
-                f"{semitone_shift:+.1f} semitones toward reference"
-            )
-            audio = librosa.effects.pitch_shift(audio, sr=sr, n_steps=semitone_shift)
+            if ENABLE_PITCH_CORRECTION:
+                report.notes.append(
+                    f"pitch outlier ({median_pitch:.0f} Hz) -> shifting "
+                    f"{semitone_shift:+.1f} semitones toward reference"
+                )
+                audio = librosa.effects.pitch_shift(audio, sr=sr, n_steps=semitone_shift)
+            else:
+                report.notes.append(
+                    f"pitch outlier ({median_pitch:.0f} Hz) detected but NOT "
+                    "corrected (ENABLE_PITCH_CORRECTION=False, see benchmark note)"
+                )
         return audio
     except Exception as exc:
         logger.warning("Pitch step failed (%s), passing audio through unshifted.", exc)
@@ -187,11 +236,18 @@ def _detect_and_correct_speed(
             # noisy onset estimate, so only close ~60% of the gap)
             target_stretch = 1.0 + 0.6 * (ratio - 1.0)
             target_stretch = float(np.clip(target_stretch, 0.5, 2.0))
-            report.notes.append(
-                f"speech rate flagged as {report.speed_label} "
-                f"(ratio={ratio:.2f}) -> time-stretch factor {target_stretch:.2f}"
-            )
-            audio = librosa.effects.time_stretch(audio, rate=target_stretch)
+            if ENABLE_SPEED_CORRECTION:
+                report.notes.append(
+                    f"speech rate flagged as {report.speed_label} "
+                    f"(ratio={ratio:.2f}) -> time-stretch factor {target_stretch:.2f}"
+                )
+                audio = librosa.effects.time_stretch(audio, rate=target_stretch)
+            else:
+                report.notes.append(
+                    f"speech rate flagged as {report.speed_label} (ratio={ratio:.2f}) "
+                    "but NOT time-stretched (ENABLE_SPEED_CORRECTION=False, see "
+                    "benchmark note -- unreliable on single isolated words)"
+                )
 
         return audio
     except Exception as exc:
