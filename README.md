@@ -180,13 +180,31 @@ python verify_setup.py
 
 ## 7. Running the chatbot
 
+Two front ends, same back end (`src/pipeline.py`) — pick whichever fits:
+
+**Terminal:**
 ```bash
 python src/cli.py
 ```
-
-- Speak naturally — the system detects when you stop talking.
+- Speak naturally — the system detects when you stop talking (VAD-based).
 - Live transcription, confidence score, and the LLM's response are shown in the CLI.
 - Say "exit" or press `Ctrl+C` to quit.
+
+**Browser chat UI** (`python src/chat_web.py` → open `http://localhost:5006`):
+- A proper chat interface — message bubbles, a mic button, and a text box (type
+  instead of speaking any time; useful for testing or a quiet environment).
+- Click the mic once to start recording, again to stop (no fixed duration).
+- The LLM's reply streams in token-by-token like a normal chat app, then Piper
+  speaks it automatically; click "🔊 Replay" on any assistant message to hear it
+  again without re-asking.
+- Low-confidence transcriptions show as a dashed, grayed-out bubble with the
+  confidence score instead of being sent to the model — same confidence-gating
+  logic as the CLI, just visible instead of implicit.
+- Unlike the CLI, this UI keeps real multi-turn conversation memory (it uses
+  Ollama's `/api/chat` with the running message history, not one-shot
+  `/api/generate` calls) — ask a follow-up and it remembers context.
+- Same offline guarantee as everywhere else: Flask binds to `127.0.0.1` only: your
+  voice and the model's replies never leave this machine.
 
 To reproduce the benchmark:
 

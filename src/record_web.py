@@ -21,12 +21,14 @@ Usage:
 from __future__ import annotations
 
 import csv
-import io
 import os
+import sys
 
-import numpy as np
 import soundfile as sf
 from flask import Flask, jsonify, request, send_from_directory
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from browser_audio import decode_browser_audio  # noqa: E402
 
 SAMPLE_RATE = 16000
 DEFAULT_WORDS = ["yes", "no", "stop", "help", "start"]
@@ -39,33 +41,6 @@ STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web_recor
 MIN_CLIP_SECONDS = 0.3
 
 app = Flask(__name__, static_folder=None)
-
-
-def decode_audio_to_16k_mono(raw_bytes: bytes) -> np.ndarray:
-    """Decode whatever the browser's MediaRecorder produced (webm/opus in
-    Chrome/Edge, ogg/opus in Firefox) into float32 mono PCM at
-    SAMPLE_RATE. PyAV bundles its own ffmpeg libs, so this needs no
-    system-level ffmpeg install.
-    """
-    import av
-
-    container = av.open(io.BytesIO(raw_bytes))
-    try:
-        stream = next(s for s in container.streams if s.type == "audio")
-        resampler = av.AudioResampler(format="fltp", layout="mono", rate=SAMPLE_RATE)
-        chunks = []
-        for frame in container.decode(stream):
-            for resampled in resampler.resample(frame):
-                chunks.append(resampled.to_ndarray().reshape(-1))
-        # flush anything buffered in the resampler
-        for resampled in resampler.resample(None):
-            chunks.append(resampled.to_ndarray().reshape(-1))
-    finally:
-        container.close()
-
-    if not chunks:
-        return np.zeros(0, dtype=np.float32)
-    return np.concatenate(chunks).astype(np.float32)
 
 
 def load_manifest_rows() -> list[dict]:
@@ -121,7 +96,7 @@ def upload():
 
     raw_bytes = request.files["audio"].read()
     try:
-        audio = decode_audio_to_16k_mono(raw_bytes)
+        audio = decode_browser_audio(raw_bytes, SAMPLE_RATE)
     except Exception as exc:
         return jsonify({"error": f"Could not decode audio: {exc}"}), 400
 
