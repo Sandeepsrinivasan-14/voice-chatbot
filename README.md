@@ -90,6 +90,16 @@ output.
   markdown") fixed this immediately, on every model tested. Lesson: for a voice
   interface, prompt-level response shaping matters as much as model choice.
 
+**Building the test dataset** — two interchangeable recorders, same output format
+(`data/test_samples/*.wav` + `manifest.csv`), pick whichever you prefer:
+- `python src/record_test_samples.py` — terminal prompts, zero extra dependencies.
+- `python src/record_web.py` then open `http://localhost:5005` — a nicer browser UI
+  (live progress, playback/retake, resume-if-interrupted) for the same 25 clips. Still
+  100% local: it's a Flask server bound to `127.0.0.1`, your mic audio never leaves
+  this machine, and it decodes the browser's recording (webm/opus) with `PyAV`
+  (already installed as a faster-whisper dependency) straight into the same 16kHz
+  mono WAV format the terminal recorder produces.
+
 ---
 
 ## 5. Benchmark results

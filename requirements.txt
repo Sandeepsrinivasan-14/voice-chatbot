@@ -33,3 +33,9 @@ piper-tts>=1.2.0            # local, offline neural TTS
 # --- CLI / reporting ---
 rich>=13.7.0                # Phase 7 CLI (status panels, live transcription)
 matplotlib>=3.8.0           # Phase 5 benchmark chart
+
+# --- Phase 4 browser recorder (src/record_web.py) ---
+flask>=3.0.0                 # tiny local server, binds to 127.0.0.1 only
+# audio decoding (webm/opus from the browser -> 16kHz mono wav) uses the
+# `av` package, already installed as a faster-whisper dependency -- no
+# extra entry needed here.

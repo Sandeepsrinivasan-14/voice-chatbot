@@ -16,4 +16,5 @@ data/results/*.png
 
 # editor/tool-specific state, not project content
 .serena/
+.playwright-mcp/
 

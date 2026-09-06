@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voice Sample Recorder</title>
+<style>
+  :root{
+    --bg-0:#0b0d14; --bg-1:#12162277; --card:#171b28cc; --card-border:#2a3040;
+    --text:#eef1f8; --text-dim:#9aa3b8; --text-faint:#5c6479;
+    --accent:#60a5fa; --accent-dim:#60a5fa33;
+    --danger:#f87171; --success:#34d399;
+    --radius:20px;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;}
+  body{
+    margin:0; min-height:100vh; color:var(--text);
+    background:
+      radial-gradient(60vmax 60vmax at 15% 10%, #3b82f622, transparent 60%),
+      radial-gradient(70vmax 70vmax at 90% 80%, #a78bfa22, transparent 60%),
+      var(--bg-0);
+    font-family: -apple-system, "Segoe UI", ui-sans-serif, system-ui, Roboto, Arial, sans-serif;
+    display:flex; align-items:center; justify-content:center; padding:32px 16px;
+    overflow-x:hidden;
+  }
+  .app{ width:100%; max-width:620px; }
+  header{ text-align:center; margin-bottom:28px; }
+  header h1{ font-size:1.7rem; margin:0 0 6px; letter-spacing:-0.02em; }
+  header .subtitle{ color:var(--text-dim); margin:0; font-size:0.95rem; }
+
+  .screen[hidden]{ display:none; }
+  .card{
+    background:var(--card); border:1px solid var(--card-border);
+    border-radius:var(--radius); padding:32px; backdrop-filter:blur(10px);
+    box-shadow:0 20px 60px -20px #00000088;
+    animation:rise .5s cubic-bezier(.2,.9,.25,1) both;
+  }
+  @keyframes rise{ from{opacity:0; transform:translateY(14px);} to{opacity:1; transform:none;} }
+
+  /* ---- start screen ---- */
+  .card h2{ margin-top:0; font-size:1.25rem; }
+  .card p{ color:var(--text-dim); line-height:1.55; }
+  code{ background:#0000004d; padding:2px 6px; border-radius:6px; font-size:0.85em; color:#d7ddee;}
+  .word-chip-row{ display:flex; flex-wrap:wrap; gap:8px; margin:18px 0 22px; }
+  .word-chip{
+    background:#ffffff0f; border:1px solid #ffffff1f; padding:6px 14px;
+    border-radius:999px; font-size:0.85rem; color:var(--text);
+  }
+  .words-input{
+    width:100%; padding:10px 14px; margin:6px 0 20px; border-radius:12px;
+    border:1px solid var(--card-border); background:#00000033; color:var(--text);
+    font-size:0.9rem; outline:none;
+  }
+  .words-input:focus{ border-color:var(--accent); }
+  label.field-label{ font-size:0.78rem; text-transform:uppercase; letter-spacing:.08em; color:var(--text-faint); }
+
+  .btn-primary, .btn-secondary{
+    border:none; border-radius:14px; padding:14px 22px; font-size:1rem; font-weight:600;
+    cursor:pointer; transition:transform .15s ease, box-shadow .15s ease, opacity .15s ease;
+  }
+  .btn-primary{
+    background:linear-gradient(135deg, var(--accent), #818cf8); color:#0b0d14;
+    width:100%; box-shadow:0 10px 30px -10px var(--accent-dim);
+  }
+  .btn-primary:hover{ transform:translateY(-1px); }
+  .btn-primary:disabled{ opacity:.5; cursor:not-allowed; transform:none; }
+  .btn-secondary{
+    background:#ffffff12; color:var(--text); border:1px solid #ffffff22;
+  }
+  .btn-secondary:hover{ background:#ffffff1f; }
+  .hint{ font-size:0.82rem; color:var(--text-faint); margin-top:14px; margin-bottom:0; }
+
+  /* ---- progress ---- */
+  .progress-track{
+    display:flex; gap:5px; justify-content:center; margin-bottom:20px; flex-wrap:wrap;
+  }
+  .progress-track[hidden]{ display:none; }
+  .progress-group{ display:flex; gap:5px; padding:4px 6px; border-radius:10px; }
+  .dot{
+    width:10px; height:10px; border-radius:50%; background:#ffffff1a;
+    border:1px solid #ffffff26; transition:all .25s ease;
+  }
+  .dot.current{ background:var(--accent); box-shadow:0 0 0 4px var(--accent-dim); transform:scale(1.15); }
+  .dot.done{ background:var(--success); border-color:var(--success); }
+
+  /* ---- record screen ---- */
+  .record-card{ text-align:center; }
+  .badge{
+    display:inline-block; padding:5px 14px; border-radius:999px; font-size:0.75rem;
+    font-weight:700; text-transform:uppercase; letter-spacing:.08em;
+    background:var(--accent-dim); color:var(--accent); margin-bottom:14px;
+    transition:all .3s ease;
+  }
+  .word-counter{ color:var(--text-faint); font-size:0.8rem; margin-bottom:2px; }
+  .word-display{
+    font-size:3.4rem; font-weight:800; letter-spacing:-0.02em; margin:6px 0 10px;
+    background:linear-gradient(135deg, #fff, #c9d2e8);
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+  }
+  .instruction{ min-height:1.5em; margin:0 0 26px; }
+
+  .record-zone{ position:relative; display:flex; flex-direction:column; align-items:center; gap:14px; }
+  .record-button{
+    position:relative; width:110px; height:110px; border-radius:50%;
+    border:none; cursor:pointer; background:#ffffff10; border:2px solid #ffffff26;
+    display:flex; align-items:center; justify-content:center;
+    transition:border-color .2s ease;
+  }
+  .record-button-inner{
+    width:44px; height:44px; border-radius:50%;
+    background:linear-gradient(135deg, var(--danger), #ef4444);
+    transition:all .25s cubic-bezier(.2,.9,.25,1);
+    box-shadow:0 0 0 0 #f8717166;
+  }
+  .record-button.recording .record-button-inner{
+    border-radius:10px; width:34px; height:34px;
+    animation:pulse-glow 1.1s ease-in-out infinite;
+  }
+  .record-button.countdown .record-button-inner{ opacity:.3; }
+  @keyframes pulse-glow{
+    0%,100%{ box-shadow:0 0 0 0 #f8717155; }
+    50%{ box-shadow:0 0 0 var(--glow, 14px) #f8717133; }
+  }
+  .record-status{ font-size:0.88rem; color:var(--text-dim); min-height:1.3em; }
+  .countdown-num{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    font-size:2.6rem; font-weight:800; color:var(--text); pointer-events:none;
+  }
+  .countdown-num[hidden]{ display:none; }
+
+  .playback-controls{ display:flex; gap:10px; margin-top:24px; flex-wrap:wrap; }
+  .playback-controls[hidden]{ display:none; }
+  .playback-controls button{ flex:1; min-width:110px; }
+
+  /* ---- done screen ---- */
+  .success-icon{
+    width:64px; height:64px; border-radius:50%; margin:0 auto 18px;
+    background:linear-gradient(135deg, var(--success), #10b981);
+    display:flex; align-items:center; justify-content:center; font-size:1.8rem; color:#06281c;
+    animation:pop .5s cubic-bezier(.2,.9,.25,1) both;
+  }
+  @keyframes pop{ 0%{transform:scale(0);} 70%{transform:scale(1.15);} 100%{transform:scale(1);} }
+  #screen-done .card{ text-align:center; }
+
+  .toast{
+    position:fixed; left:50%; bottom:28px; transform:translateX(-50%);
+    background:#1c2233; border:1px solid #ffffff22; color:var(--text);
+    padding:12px 20px; border-radius:12px; font-size:0.88rem; box-shadow:0 10px 30px -10px #000000aa;
+    animation:toast-in .25s ease both;
+  }
+  .toast.error{ border-color:#f8717166; color:#fecaca; }
+  @keyframes toast-in{ from{opacity:0; transform:translate(-50%, 10px);} to{opacity:1; transform:translate(-50%,0);} }
+</style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>🎙️ Voice Sample Recorder</h1>
+      <p class="subtitle">Local Voice Chatbot &middot; modulation-robustness test set</p>
+    </header>
+
+    <div class="progress-track" id="progress-track" hidden></div>
+
+    <section id="screen-start" class="screen">
+      <div class="card">
+        <h2>Let's build your test set</h2>
+        <p>
+          You'll say each word below across <strong>5 modulations</strong> &mdash;
+          normal, whispered, shouted, slow, fast &mdash; straight into your mic.
+          Every clip is saved directly to <code>data/test_samples/</code> and
+          added to <code>manifest.csv</code>, ready for <code>benchmark.py</code>.
+        </p>
+        <label class="field-label" for="words-input">Words (comma-separated)</label>
+        <input id="words-input" class="words-input" value="yes, no, stop, help, start">
+        <div class="word-chip-row" id="word-chip-row"></div>
+        <button id="btn-start" class="btn-primary">Grant mic access &amp; start</button>
+        <p class="hint">Tip: a quiet room helps. You'll get to play back and retake every single clip before it's saved.</p>
+        <p class="hint" id="resume-hint" hidden></p>
+      </div>
+    </section>
+
+    <section id="screen-record" class="screen" hidden>
+      <div class="card record-card">
+        <div class="word-counter" id="word-counter">1 / 25</div>
+        <span class="badge" id="badge-modulation">normal</span>
+        <div class="word-display" id="word-display">YES</div>
+        <p class="instruction" id="instruction">Say it normally, like regular conversation.</p>
+
+        <div class="record-zone">
+          <button id="btn-record" class="record-button" aria-label="Record">
+            <span class="record-button-inner"></span>
+            <span class="countdown-num" id="countdown-num" hidden></span>
+          </button>
+          <div class="record-status" id="record-status">Tap to record</div>
+        </div>
+
+        <div class="playback-controls" id="playback-controls" hidden>
+          <button id="btn-play" class="btn-secondary">▶ Play</button>
+          <button id="btn-retake" class="btn-secondary">↺ Retake</button>
+          <button id="btn-keep" class="btn-primary">Keep &amp; Next →</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="screen-done" class="screen" hidden>
+      <div class="card">
+        <div class="success-icon">✓</div>
+        <h2>All clips recorded!</h2>
+        <p>Saved to <code>data/test_samples/</code> with an updated <code>manifest.csv</code>.</p>
+        <p class="hint">Next: run <code>python src/benchmark.py</code> &mdash; or just tell Claude you're done.</p>
+      </div>
+    </section>
+  </div>
+
+<script>
+const MODULATION_META = {
+  normal:    { color: '#60a5fa', text: 'Say it normally, like regular conversation.' },
+  whispered: { color: '#a78bfa', text: 'Whisper it as quietly as you comfortably can.' },
+  shouted:   { color: '#f87171', text: 'Say it loudly, as if shouting across a room.' },
+  slow:      { color: '#2dd4bf', text: 'Say it very slowly, stretching the word out.' },
+  fast:      { color: '#fbbf24', text: 'Say it very fast, rushed.' },
+};
+const MAX_RECORD_MS = 8000;
+const MIN_RECORD_MS = 300;
+
+let combos = [];
+let idx = 0;
+let stream = null;
+let mediaRecorder = null;
+let chunks = [];
+let currentBlob = null;
+let recordState = 'idle'; // idle | countdown | recording | reviewing
+let recordStartTs = 0;
+let autoStopTimer = null;
+
+const el = (id) => document.getElementById(id);
+const startScreen = el('screen-start');
+const recordScreen = el('screen-record');
+const doneScreen = el('screen-done');
+const progressTrack = el('progress-track');
+
+function showToast(msg, isError) {
+  const t = document.createElement('div');
+  t.className = 'toast' + (isError ? ' error' : '');
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3200);
+}
+
+function pickMimeType() {
+  const candidates = [
+    'audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/ogg',
+  ];
+  for (const c of candidates) {
+    if (window.MediaRecorder && MediaRecorder.isTypeSupported(c)) return c;
+  }
+  return '';
+}
+
+async function loadPlan(words) {
+  const url = '/api/plan' + (words ? ('?words=' + encodeURIComponent(words)) : '');
+  const res = await fetch(url);
+  const data = await res.json();
+  combos = data.combos;
+  renderWordChips(data.words);
+  const firstNotDone = combos.findIndex((c) => !c.done);
+  idx = firstNotDone === -1 ? 0 : firstNotDone;
+  const doneCount = combos.filter((c) => c.done).length;
+  if (doneCount > 0 && doneCount < combos.length) {
+    el('resume-hint').hidden = false;
+    el('resume-hint').textContent = `Found ${doneCount}/${combos.length} clips already recorded -- you'll resume from where you left off.`;
+  }
+  buildProgressTrack();
+}
+
+function renderWordChips(words) {
+  const row = el('word-chip-row');
+  row.innerHTML = '';
+  words.forEach((w) => {
+    const chip = document.createElement('span');
+    chip.className = 'word-chip';
+    chip.textContent = w;
+    row.appendChild(chip);
+  });
+}
+
+function buildProgressTrack() {
+  // Note: does NOT reveal the track -- it's built as soon as the plan
+  // loads (including the page-load call that only checks for a resume
+  // hint) but stays hidden until initMicAndBegin() actually shows the
+  // record screen.
+  progressTrack.innerHTML = '';
+  const byWord = {};
+  combos.forEach((c, i) => {
+    (byWord[c.word] = byWord[c.word] || []).push(i);
+  });
+  Object.values(byWord).forEach((indices) => {
+    const group = document.createElement('div');
+    group.className = 'progress-group';
+    indices.forEach((i) => {
+      const dot = document.createElement('span');
+      dot.className = 'dot';
+      dot.dataset.idx = i;
+      group.appendChild(dot);
+    });
+    progressTrack.appendChild(group);
+  });
+  refreshProgressDots();
+}
+
+function refreshProgressDots() {
+  progressTrack.querySelectorAll('.dot').forEach((dot) => {
+    const i = Number(dot.dataset.idx);
+    dot.classList.toggle('done', !!combos[i].done);
+    dot.classList.toggle('current', i === idx);
+  });
+}
+
+async function initMicAndBegin() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (err) {
+    showToast('Microphone access denied or unavailable: ' + err.message, true);
+    return;
+  }
+  startScreen.hidden = true;
+  recordScreen.hidden = false;
+  progressTrack.hidden = false;
+  renderCurrentCombo();
+}
+
+function renderCurrentCombo() {
+  if (idx >= combos.length) { showDone(); return; }
+  const combo = combos[idx];
+  const meta = MODULATION_META[combo.modulation];
+  el('word-counter').textContent = `${idx + 1} / ${combos.length}`;
+  el('word-display').textContent = combo.word.toUpperCase();
+  el('badge-modulation').textContent = combo.modulation;
+  el('badge-modulation').style.color = meta.color;
+  el('badge-modulation').style.background = meta.color + '33';
+  el('instruction').textContent = meta.text;
+  document.documentElement.style.setProperty('--accent', meta.color);
+  document.documentElement.style.setProperty('--accent-dim', meta.color + '33');
+  el('playback-controls').hidden = true;
+  el('record-status').textContent = 'Tap to record';
+  recordState = 'idle';
+  currentBlob = null;
+  refreshProgressDots();
+}
+
+function setRecordButtonState(state) {
+  const btn = el('btn-record');
+  btn.classList.remove('recording', 'countdown');
+  if (state === 'recording') btn.classList.add('recording');
+  if (state === 'countdown') btn.classList.add('countdown');
+}
+
+function startCountdown() {
+  recordState = 'countdown';
+  setRecordButtonState('countdown');
+  const numEl = el('countdown-num');
+  numEl.hidden = false;
+  let n = 3;
+  numEl.textContent = n;
+  el('record-status').textContent = 'Get ready...';
+  const iv = setInterval(() => {
+    n -= 1;
+    if (n <= 0) {
+      clearInterval(iv);
+      numEl.hidden = true;
+      beginRecording();
+    } else {
+      numEl.textContent = n;
+    }
+  }, 550);
+}
+
+function beginRecording() {
+  chunks = [];
+  const mimeType = pickMimeType();
+  try {
+    mediaRecorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+  } catch (err) {
+    showToast('Recording failed to start: ' + err.message, true);
+    recordState = 'idle';
+    setRecordButtonState('idle');
+    return;
+  }
+  mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) chunks.push(e.data); };
+  mediaRecorder.onstop = onRecordingStopped;
+  mediaRecorder.start();
+  recordState = 'recording';
+  recordStartTs = Date.now();
+  setRecordButtonState('recording');
+  el('record-status').textContent = 'Recording... tap to stop';
+  autoStopTimer = setTimeout(() => stopRecording(), MAX_RECORD_MS);
+}
+
+function stopRecording() {
+  if (autoStopTimer) { clearTimeout(autoStopTimer); autoStopTimer = null; }
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+}
+
+function onRecordingStopped() {
+  const elapsed = Date.now() - recordStartTs;
+  const mimeType = mediaRecorder.mimeType || 'audio/webm';
+  const blob = new Blob(chunks, { type: mimeType });
+  setRecordButtonState('idle');
+  if (elapsed < MIN_RECORD_MS || blob.size < 500) {
+    showToast('That was too short -- try again.', true);
+    recordState = 'idle';
+    el('record-status').textContent = 'Tap to record';
+    return;
+  }
+  currentBlob = blob;
+  recordState = 'reviewing';
+  el('record-status').textContent = 'Recorded! Review below.';
+  el('playback-controls').hidden = false;
+}
+
+function playCurrentBlob() {
+  if (!currentBlob) return;
+  const url = URL.createObjectURL(currentBlob);
+  const audio = new Audio(url);
+  audio.play();
+  audio.onended = () => URL.revokeObjectURL(url);
+}
+
+function retake() {
+  currentBlob = null;
+  recordState = 'idle';
+  el('playback-controls').hidden = true;
+  el('record-status').textContent = 'Tap to record';
+}
+
+async function keepAndNext() {
+  if (!currentBlob) return;
+  const combo = combos[idx];
+  const btn = el('btn-keep');
+  btn.disabled = true;
+  btn.textContent = 'Saving...';
+  try {
+    const form = new FormData();
+    const ext = (currentBlob.type.includes('ogg')) ? 'ogg' : 'webm';
+    form.append('audio', currentBlob, `clip.${ext}`);
+    form.append('word', combo.word);
+    form.append('modulation', combo.modulation);
+    const res = await fetch('/api/upload', { method: 'POST', body: form });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || ('HTTP ' + res.status));
+    combo.done = true;
+    idx += 1;
+    renderCurrentCombo();
+  } catch (err) {
+    showToast('Save failed: ' + err.message, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Keep & Next →';
+  }
+}
+
+function showDone() {
+  recordScreen.hidden = true;
+  doneScreen.hidden = false;
+  progressTrack.hidden = true;
+  if (stream) stream.getTracks().forEach((t) => t.stop());
+}
+
+el('btn-start').addEventListener('click', async () => {
+  const btn = el('btn-start');
+  btn.disabled = true;
+  try {
+    // Re-load the plan with whatever word list is currently in the input
+    // (it may differ from the default shown on page load) BEFORE asking
+    // for the mic, so `combos` reflects the user's actual choice.
+    await loadPlan(el('words-input').value);
+    await initMicAndBegin();
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+el('btn-record').addEventListener('click', () => {
+  if (recordState === 'idle') startCountdown();
+  else if (recordState === 'recording') stopRecording();
+});
+
+el('btn-play').addEventListener('click', playCurrentBlob);
+el('btn-retake').addEventListener('click', retake);
+el('btn-keep').addEventListener('click', keepAndNext);
+
+// Load the plan once up front (default word list) purely so the start
+// screen can show a "resume from where you left off" hint immediately.
+loadPlan();
+</script>
+</body>
+</html>
