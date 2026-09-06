@@ -1,0 +1,8 @@
+venv/
+__pycache__/
+*.pyc
+data/results/*.wav
+data/test_samples/*.wav
+logs/*.log
+*.egg-info/
+.pytest_cache/

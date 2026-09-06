@@ -1,0 +1,2 @@
+# Filled in during Phase 1 of voice-chatbot-build-guide.md
+# Core: faster-whisper, sounddevice, numpy, librosa, soundfile
