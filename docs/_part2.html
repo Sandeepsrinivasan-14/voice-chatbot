@@ -1,0 +1,271 @@
+<!-- ================= 2. INTRODUCTION ================= -->
+<div class="section">
+<h1><span class="num">2</span>Introduction</h1>
+
+<h2>2.1 Purpose</h2>
+<p>This document defines, in a single controlled artefact, what the Local Voice Chatbot system does,
+how it is constructed, how its behaviour has been verified, and what its residual risks and
+limitations are. It serves three functions: as a <em>specification</em> against which the delivered
+implementation can be assessed; as a <em>design record</em> explaining why each significant technical
+decision was taken; and as an <em>evidence dossier</em> presenting the measured results that support
+or, in one important case, refute the system's design hypotheses.</p>
+
+<h2>2.2 Intended Audience</h2>
+<table class="t">
+  <thead><tr><th style="width:44mm">Audience</th><th style="width:52mm">Primary sections</th><th>Reading objective</th></tr></thead>
+  <tbody>
+    <tr><td>Technical reviewer / assessor</td><td>§1, §7, §11, §12, §15</td><td>Assess engineering quality, evidence discipline, and ethical reasoning.</td></tr>
+    <tr><td>Engineer maintaining the system</td><td>§7, §8, §9, §10, §16</td><td>Understand the architecture and modify it safely.</td></tr>
+    <tr><td>Reviewer of requirements</td><td>§3, §4, §5, §6, §11.6</td><td>Confirm requirement completeness and verification coverage.</td></tr>
+    <tr><td>Operator / end user</td><td>§16, §17</td><td>Install, configure, run, and troubleshoot the system.</td></tr>
+  </tbody>
+</table>
+
+<h2>2.3 Scope</h2>
+<h3>2.3.1 In Scope</h3>
+<ul>
+  <li>Real-time speech capture with automatic endpoint detection, on a single local machine.</li>
+  <li>Offline speech-to-text with GPU acceleration and automatic CPU fallback.</li>
+  <li>Confidence assessment of each transcription, with retry and explicit-rejection behaviour.</li>
+  <li>Response generation by a locally-hosted large language model, with multi-turn context.</li>
+  <li>Offline neural speech synthesis and playback of the generated response.</li>
+  <li>Two operator interfaces: a terminal client and a browser-based chat interface.</li>
+  <li>Tooling to record a personal evaluation dataset and to execute a reproducible accuracy benchmark.</li>
+  <li>Configuration management, automated testing, continuous integration, logging, and error handling.</li>
+</ul>
+
+<h3>2.3.2 Out of Scope</h3>
+<ul>
+  <li><strong>Authentication and authorisation.</strong> The system is designed for single-user
+    operation on <code>127.0.0.1</code>. It has no user accounts, sessions, or access control.</li>
+  <li><strong>Multi-user or concurrent operation.</strong> One recogniser instance, no request
+    queueing, no tenancy isolation.</li>
+  <li><strong>Internet-facing deployment.</strong> Hosting the system publicly would contradict its
+    core design premise (§15.1) and is explicitly not supported.</li>
+  <li><strong>Packaging and distribution</strong> (installer, container image, signed release).</li>
+  <li><strong>Wake-word activation, barge-in interruption, and speaker identification.</strong></li>
+  <li><strong>Languages other than English.</strong> Recognition is pinned to English; the synthesis
+    voice is US English.</li>
+</ul>
+
+<h2>2.4 Definitions, Acronyms and Abbreviations</h2>
+<table class="t">
+  <thead><tr><th style="width:34mm">Term</th><th>Definition</th></tr></thead>
+  <tbody>
+    <tr><td><strong>STT</strong></td><td>Speech-to-Text. Conversion of an audio waveform into a text transcription. Also "ASR" (Automatic Speech Recognition).</td></tr>
+    <tr><td><strong>TTS</strong></td><td>Text-to-Speech. Synthesis of an audio waveform from text.</td></tr>
+    <tr><td><strong>LLM</strong></td><td>Large Language Model. Here, a 3.2-billion-parameter instruction-tuned transformer served locally.</td></tr>
+    <tr><td><strong>VAD</strong></td><td>Voice Activity Detection. Frame-level classification of audio as speech or non-speech; used to determine when the speaker has finished.</td></tr>
+    <tr><td><strong>avg_logprob</strong></td><td>The mean log-probability the recogniser assigned to the tokens it emitted for a segment. Used here as an uncalibrated confidence proxy.</td></tr>
+    <tr><td><strong>Modulation</strong></td><td>In this document, a deliberate variation in vocal delivery of the same word — normal, whispered, shouted, slow, or fast.</td></tr>
+    <tr><td><strong>Confidence gate</strong></td><td>The decision layer that accepts, re-attempts, or rejects a transcription based on its <code>avg_logprob</code>.</td></tr>
+    <tr><td><strong>Beam size</strong></td><td>Width of the decoder's search. A larger beam explores more candidate token sequences at higher computational cost.</td></tr>
+    <tr><td><strong>RMS</strong></td><td>Root Mean Square. Used as an amplitude measure that reflects sustained loudness rather than peak level.</td></tr>
+    <tr><td><strong>f0</strong></td><td>Fundamental frequency — the perceived pitch of voiced speech.</td></tr>
+    <tr><td><strong>WSGI</strong></td><td>Web Server Gateway Interface. The Python standard interface between web servers and applications.</td></tr>
+    <tr><td><strong>Ablation</strong></td><td>An experimental technique in which components are selectively disabled to attribute an observed effect to a specific cause.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<!-- ================= 3. PRODUCT OVERVIEW ================= -->
+<div class="section">
+<h1><span class="num">3</span>Product Overview</h1>
+
+<h2>3.1 Problem Statement</h2>
+<p>Speech recognition models are trained predominantly on conversational and read speech delivered at
+typical loudness, pitch, and rate. When a speaker departs from that distribution — whispering in a
+quiet room, raising their voice across a distance, deliberately slowing down for emphasis, or
+rushing — recognition accuracy falls. The operational hazard is not the accuracy loss itself but
+its <em>failure mode</em>: the model does not signal uncertainty. It emits a fluent, plausible, and
+incorrect transcription, which any downstream component will then treat as ground truth.</p>
+
+<p>In a voice assistant this produces a characteristic and damaging user experience: the assistant
+answers a question the user did not ask, with no indication that it misheard. For command words in
+particular — <code>stop</code>, <code>help</code> — a silent substitution is a functional failure,
+not merely an annoyance.</p>
+
+<p>A second constraint shapes the design. Voice data is among the most sensitive categories of
+personal data: it carries identity, emotional state, health signals, and whatever the speaker
+happens to say in their own home. Any architecture that transmits raw audio to a third-party service
+inherits an irreducible privacy exposure. This project therefore adopts a strict constraint: nothing
+leaves the machine.</p>
+
+<h2>3.2 Solution Overview</h2>
+<p>The system implements a five-stage pipeline in which every stage executes locally, together with a
+decision gate between recognition and generation.</p>
+
+<div class="flow">
+  <div class="flow-row">
+    <div class="fbox"><span class="fb-t">Capture</span><span class="fb-s">Mic + WebRTC VAD</span></div>
+    <div class="farrow">›</div>
+    <div class="fbox"><span class="fb-t">Preprocess</span><span class="fb-s">RMS normalise</span></div>
+    <div class="farrow">›</div>
+    <div class="fbox"><span class="fb-t">Recognise</span><span class="fb-s">faster-whisper, GPU</span></div>
+    <div class="farrow">›</div>
+    <div class="fbox gate"><span class="fb-t">Confidence gate</span><span class="fb-s">accept / retry / reject</span></div>
+    <div class="farrow">›</div>
+    <div class="fbox"><span class="fb-t">Generate</span><span class="fb-s">Ollama, local LLM</span></div>
+    <div class="farrow">›</div>
+    <div class="fbox"><span class="fb-t">Synthesise</span><span class="fb-s">Piper TTS</span></div>
+  </div>
+  <div class="figcap"><b>Figure 1.</b> End-to-end processing pipeline. Every stage executes on local
+  hardware; the only network traffic is loopback to <code>127.0.0.1</code>. The confidence gate is the
+  sole point at which the pipeline may decline to proceed and return control to the speaker.</div>
+</div>
+
+<p>The confidence gate is the architecturally significant element. Rather than forcing the recogniser
+to always produce an answer, the system treats "I am not sufficiently sure" as a first-class outcome:
+it re-decodes with a wider beam, and if confidence remains below threshold it asks the speaker to
+repeat rather than guessing. This mirrors how uncertainty is handled in production speech systems and
+converts a silent failure into a recoverable interaction.</p>
+
+<h2>3.3 User Characteristics</h2>
+<table class="t">
+  <thead><tr><th style="width:38mm">User class</th><th style="width:42mm">Technical proficiency</th><th>Interaction with the system</th></tr></thead>
+  <tbody>
+    <tr><td>Primary operator (end user)</td><td>Low — no programming knowledge assumed</td><td>Speaks to the assistant through the browser interface; reads transcriptions and responses; may type instead of speaking.</td></tr>
+    <tr><td>Developer / maintainer</td><td>High — Python, CLI, basic ML operations</td><td>Installs dependencies, configures the system, runs the test suite, extends modules.</td></tr>
+    <tr><td>Evaluator</td><td>Moderate to high</td><td>Records an evaluation dataset, executes the benchmark, inspects results and audit logs.</td></tr>
+  </tbody>
+</table>
+
+<h2>3.4 Operating Environment</h2>
+<p>The system was developed and verified on the following reference configuration. It is not
+restricted to this configuration, but performance characteristics in §13 are stated against it.</p>
+<table class="t">
+  <thead><tr><th style="width:44mm">Element</th><th>Reference configuration (as verified)</th></tr></thead>
+  <tbody>
+    <tr><td>Operating system</td><td>Windows 11 (build 10.0.26200)</td></tr>
+    <tr><td>Python runtime</td><td>CPython 3.11.9, isolated virtual environment</td></tr>
+    <tr><td>GPU</td><td>NVIDIA GeForce RTX 3050 Laptop GPU, 4096 MiB VRAM, driver 581.95</td></tr>
+    <tr><td>System memory</td><td>16 GB</td></tr>
+    <tr><td>Recognition engine</td><td>faster-whisper 1.2.1 on CTranslate2 4.8.2; model <code>small</code>, compute type <code>int8_float16</code></td></tr>
+    <tr><td>Language model runtime</td><td>Ollama 0.33.3 serving <code>llama3.2:3b</code> (3.2 B parameters, Q4_K_M quantisation, 2.0 GB)</td></tr>
+    <tr><td>Synthesis engine</td><td>piper-tts 1.8.0, voice <code>en_US-lessac-medium</code> (60 MB ONNX), 22.05 kHz mono output</td></tr>
+    <tr><td>Browser</td><td>Any Chromium- or Gecko-based browser supporting <code>MediaRecorder</code> and <code>getUserMedia</code></td></tr>
+  </tbody>
+</table>
+
+<h2>3.5 Constraints, Assumptions and Dependencies</h2>
+<table class="t">
+  <thead><tr><th style="width:20mm">ID</th><th style="width:24mm">Type</th><th>Statement and consequence</th></tr></thead>
+  <tbody>
+    <tr><td class="id-col">CON-01</td><td>Constraint</td><td><strong>No external network calls.</strong> Every component must operate against local files or loopback addresses. This eliminates cloud STT/LLM/TTS options entirely and drives the selection in §7.4.</td></tr>
+    <tr><td class="id-col">CON-02</td><td>Constraint</td><td><strong>4 GB VRAM budget, shared.</strong> The recogniser and the language model must be simultaneously resident. This bounds model sizes and mandates quantisation (§13.2).</td></tr>
+    <tr><td class="id-col">CON-03</td><td>Constraint</td><td><strong>Consumer Windows host.</strong> Precludes deployment tooling that assumes Linux (e.g. <code>gunicorn</code>), and introduces the CUDA library resolution problem documented in §8.4.2.</td></tr>
+    <tr><td class="id-col">CON-04</td><td>Constraint</td><td><strong>Browser microphone access requires a secure context.</strong> <code>getUserMedia</code> is available only over HTTPS or on <code>localhost</code>; the latter is used.</td></tr>
+    <tr><td class="id-col">ASM-01</td><td>Assumption</td><td>A single speaker uses the system at a time, in a reasonably quiet environment.</td></tr>
+    <tr><td class="id-col">ASM-02</td><td>Assumption</td><td>The operator has administrative rights sufficient to install the Ollama runtime.</td></tr>
+    <tr><td class="id-col">ASM-03</td><td>Assumption</td><td>Utterances are short — command words to single sentences. This assumption is material: §12.4 shows a design defect that arose precisely from applying a technique valid for continuous speech to isolated words.</td></tr>
+    <tr><td class="id-col">DEP-01</td><td>Dependency</td><td>Ollama must be installed and running, with the configured model pulled, before the pipeline can generate responses.</td></tr>
+    <tr><td class="id-col">DEP-02</td><td>Dependency</td><td>A Piper voice model (<code>.onnx</code> plus <code>.onnx.json</code>) must be present at the configured path.</td></tr>
+    <tr><td class="id-col">DEP-03</td><td>Dependency</td><td>GPU acceleration requires the cuBLAS and cuDNN runtime libraries; absent these, the system degrades automatically to CPU (§8.4).</td></tr>
+  </tbody>
+</table>
+</div>
+
+<!-- ================= 4. FUNCTIONAL REQUIREMENTS ================= -->
+<div class="section">
+<h1><span class="num">4</span>Functional Requirements</h1>
+
+<p>Requirements are identified as <code>FR-&lt;group&gt;.&lt;n&gt;</code>. Priority follows MoSCoW
+convention. <em>Status</em> reflects the implementation state at document baseline. <em>Verification</em>
+identifies the method by which conformance is demonstrated; the full traceability matrix is given in
+§11.6.</p>
+
+<h2>4.1 Audio Capture</h2>
+<table class="t">
+  <thead><tr><th style="width:19mm">ID</th><th>Requirement</th><th style="width:17mm" class="ctr">Priority</th><th style="width:17mm" class="ctr">Status</th><th style="width:24mm">Verification</th></tr></thead>
+  <tbody>
+    <tr><td class="id-col">FR-1.1</td><td>The system shall capture audio from the host's default input device at 16 kHz, mono, 16-bit.</td><td class="ctr"><span class="b b-must">Must</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Demonstration</td></tr>
+    <tr><td class="id-col">FR-1.2</td><td>The system shall detect the end of an utterance automatically using voice-activity detection, rather than recording for a fixed duration.</td><td class="ctr"><span class="b b-must">Must</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Demonstration</td></tr>
+    <tr><td class="id-col">FR-1.3</td><td>The system shall retain a pre-trigger audio buffer (≈300 ms) so that speech onset is not clipped.</td><td class="ctr"><span class="b b-should">Should</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Inspection</td></tr>
+    <tr><td class="id-col">FR-1.4</td><td>The system shall discard candidate utterances shorter than 150 ms of detected speech as spurious.</td><td class="ctr"><span class="b b-should">Should</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Inspection</td></tr>
+    <tr><td class="id-col">FR-1.5</td><td>The system shall terminate capture after a configurable maximum duration (default 15 s) irrespective of VAD state.</td><td class="ctr"><span class="b b-must">Must</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Inspection</td></tr>
+    <tr><td class="id-col">FR-1.6</td><td>The browser interface shall permit the user to start and stop recording explicitly, without a fixed time limit.</td><td class="ctr"><span class="b b-must">Must</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Demonstration</td></tr>
+  </tbody>
+</table>
+
+<h2>4.2 Audio Preprocessing</h2>
+<table class="t">
+  <thead><tr><th style="width:19mm">ID</th><th>Requirement</th><th style="width:17mm" class="ctr">Priority</th><th style="width:17mm" class="ctr">Status</th><th style="width:24mm">Verification</th></tr></thead>
+  <tbody>
+    <tr><td class="id-col">FR-2.1</td><td>The system shall normalise input amplitude to a consistent RMS level prior to recognition.</td><td class="ctr"><span class="b b-must">Must</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Unit test</td></tr>
+    <tr><td class="id-col">FR-2.2</td><td>Amplitude normalisation shall not introduce clipping when applying large gain to quiet input.</td><td class="ctr"><span class="b b-must">Must</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Unit test</td></tr>
+    <tr><td class="id-col">FR-2.3</td><td>The system shall detect and record the median fundamental frequency of voiced input, flagging values outside 80–400 Hz as outliers.</td><td class="ctr"><span class="b b-should">Should</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Unit test</td></tr>
+    <tr><td class="id-col">FR-2.4</td><td>The system shall estimate and record speaking rate, flagging values outside the normal band.</td><td class="ctr"><span class="b b-should">Should</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Unit test</td></tr>
+    <tr><td class="id-col">FR-2.5</td><td>Pitch and rate <em>correction</em> shall be implemented but disabled by default, following the evaluation in §12; enabling them shall require an explicit configuration change.</td><td class="ctr"><span class="b b-must">Must</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Regression test</td></tr>
+    <tr><td class="id-col">FR-2.6</td><td>Any failure within preprocessing shall be logged and the unmodified audio passed through; preprocessing shall never abort a conversational turn.</td><td class="ctr"><span class="b b-must">Must</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Unit test</td></tr>
+  </tbody>
+</table>
+
+<h2>4.3 Speech Recognition</h2>
+<table class="t">
+  <thead><tr><th style="width:19mm">ID</th><th>Requirement</th><th style="width:17mm" class="ctr">Priority</th><th style="width:17mm" class="ctr">Status</th><th style="width:24mm">Verification</th></tr></thead>
+  <tbody>
+    <tr><td class="id-col">FR-3.1</td><td>The system shall transcribe captured audio using a locally-stored recognition model, with no network access.</td><td class="ctr"><span class="b b-must">Must</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Demonstration</td></tr>
+    <tr><td class="id-col">FR-3.2</td><td>The system shall use GPU acceleration when available.</td><td class="ctr"><span class="b b-must">Must</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Demonstration</td></tr>
+    <tr><td class="id-col">FR-3.3</td><td>The system shall verify GPU usability by executing a trial inference at load time, not by construction success alone, and shall fall back to CPU if that trial fails.</td><td class="ctr"><span class="b b-must">Must</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Demonstration</td></tr>
+    <tr><td class="id-col">FR-3.4</td><td>The system shall expose the per-segment confidence score of every transcription to the calling layer.</td><td class="ctr"><span class="b b-must">Must</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Unit test</td></tr>
+    <tr><td class="id-col">FR-3.5</td><td>The recogniser shall load once per process and be reused across turns.</td><td class="ctr"><span class="b b-should">Should</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Inspection</td></tr>
+  </tbody>
+</table>
+
+<h2>4.4 Confidence Gating</h2>
+<table class="t">
+  <thead><tr><th style="width:19mm">ID</th><th>Requirement</th><th style="width:17mm" class="ctr">Priority</th><th style="width:17mm" class="ctr">Status</th><th style="width:24mm">Verification</th></tr></thead>
+  <tbody>
+    <tr><td class="id-col">FR-4.1</td><td>The system shall compute a single confidence value per utterance as the duration-weighted mean of segment log-probabilities.</td><td class="ctr"><span class="b b-must">Must</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Unit test</td></tr>
+    <tr><td class="id-col">FR-4.2</td><td>An utterance yielding no decoded segments shall be treated as a definitive rejection.</td><td class="ctr"><span class="b b-must">Must</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Unit test</td></tr>
+    <tr><td class="id-col">FR-4.3</td><td>Where confidence is at or above the configured threshold, the transcription shall be accepted and forwarded.</td><td class="ctr"><span class="b b-must">Must</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Unit test</td></tr>
+    <tr><td class="id-col">FR-4.4</td><td>Where confidence is below threshold on the first attempt, the system shall re-transcribe with an increased beam size before deciding.</td><td class="ctr"><span class="b b-must">Must</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Unit test</td></tr>
+    <tr><td class="id-col">FR-4.5</td><td>Where confidence remains below threshold after re-transcription, the system shall not forward the text to the language model, and shall instead request repetition audibly.</td><td class="ctr"><span class="b b-must">Must</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Unit test + demo</td></tr>
+    <tr><td class="id-col">FR-4.6</td><td>Every gating decision — accepted and rejected alike — shall be appended to a persistent CSV audit log with timestamp, text, score, threshold, decision, beam size and attempt number.</td><td class="ctr"><span class="b b-must">Must</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Unit test</td></tr>
+    <tr><td class="id-col">FR-4.7</td><td>The browser interface shall visually distinguish a rejected transcription from an accepted one and display the confidence score that caused the rejection.</td><td class="ctr"><span class="b b-should">Should</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Demonstration</td></tr>
+  </tbody>
+</table>
+
+<h2>4.5 Response Generation</h2>
+<table class="t">
+  <thead><tr><th style="width:19mm">ID</th><th>Requirement</th><th style="width:17mm" class="ctr">Priority</th><th style="width:17mm" class="ctr">Status</th><th style="width:24mm">Verification</th></tr></thead>
+  <tbody>
+    <tr><td class="id-col">FR-5.1</td><td>The system shall generate responses using a language model served on the local loopback interface.</td><td class="ctr"><span class="b b-must">Must</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Demonstration</td></tr>
+    <tr><td class="id-col">FR-5.2</td><td>Responses shall be streamed incrementally rather than returned only on completion.</td><td class="ctr"><span class="b b-should">Should</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Integration test</td></tr>
+    <tr><td class="id-col">FR-5.3</td><td>The system shall constrain response style, by system prompt, to short spoken-form prose without lists, headings, or markup.</td><td class="ctr"><span class="b b-must">Must</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Demonstration</td></tr>
+    <tr><td class="id-col">FR-5.4</td><td>The browser interface shall maintain multi-turn conversational context across a session.</td><td class="ctr"><span class="b b-should">Should</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Integration test</td></tr>
+    <tr><td class="id-col">FR-5.5</td><td>Transient connection failures to the model server shall be retried with backoff, provided no output has yet been delivered to the caller.</td><td class="ctr"><span class="b b-should">Should</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Integration test</td></tr>
+    <tr><td class="id-col">FR-5.6</td><td>Where the model server is unreachable, the system shall present a clear diagnostic naming the endpoint and the corrective action.</td><td class="ctr"><span class="b b-must">Must</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Integration test</td></tr>
+  </tbody>
+</table>
+
+<h2>4.6 Speech Synthesis and Interfaces</h2>
+<table class="t">
+  <thead><tr><th style="width:19mm">ID</th><th>Requirement</th><th style="width:17mm" class="ctr">Priority</th><th style="width:17mm" class="ctr">Status</th><th style="width:24mm">Verification</th></tr></thead>
+  <tbody>
+    <tr><td class="id-col">FR-6.1</td><td>The system shall synthesise the generated response to speech using a local engine and voice model.</td><td class="ctr"><span class="b b-must">Must</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Demonstration</td></tr>
+    <tr><td class="id-col">FR-6.2</td><td>Synthesised audio shall be played back automatically on completion of generation.</td><td class="ctr"><span class="b b-must">Must</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Demonstration</td></tr>
+    <tr><td class="id-col">FR-6.3</td><td>The browser interface shall allow any previous assistant response to be replayed without regenerating it.</td><td class="ctr"><span class="b b-could">Could</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Demonstration</td></tr>
+    <tr><td class="id-col">FR-7.1</td><td>The system shall provide a terminal interface presenting listening state, transcription, confidence, and response.</td><td class="ctr"><span class="b b-must">Must</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Demonstration</td></tr>
+    <tr><td class="id-col">FR-7.2</td><td>The system shall provide a browser interface with conversational message history, microphone control, and streamed responses.</td><td class="ctr"><span class="b b-must">Must</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Demonstration</td></tr>
+    <tr><td class="id-col">FR-7.3</td><td>The browser interface shall accept typed input as an alternative to speech.</td><td class="ctr"><span class="b b-should">Should</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Demonstration</td></tr>
+    <tr><td class="id-col">FR-7.4</td><td>Both interfaces shall perform preflight checks (microphone, model server, voice model) and report failures as actionable messages rather than stack traces.</td><td class="ctr"><span class="b b-must">Must</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Demonstration</td></tr>
+  </tbody>
+</table>
+
+<h2>4.7 Evaluation Tooling and Operations</h2>
+<table class="t">
+  <thead><tr><th style="width:19mm">ID</th><th>Requirement</th><th style="width:17mm" class="ctr">Priority</th><th style="width:17mm" class="ctr">Status</th><th style="width:24mm">Verification</th></tr></thead>
+  <tbody>
+    <tr><td class="id-col">FR-8.1</td><td>The system shall provide tooling to record a labelled evaluation dataset spanning defined words and modulations.</td><td class="ctr"><span class="b b-must">Must</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Demonstration</td></tr>
+    <tr><td class="id-col">FR-8.2</td><td>Recording tooling shall permit playback and re-take of each clip before it is committed.</td><td class="ctr"><span class="b b-should">Should</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Demonstration</td></tr>
+    <tr><td class="id-col">FR-8.3</td><td>Recording tooling shall resume from the last completed clip if interrupted.</td><td class="ctr"><span class="b b-could">Could</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Demonstration</td></tr>
+    <tr><td class="id-col">FR-8.4</td><td>The system shall provide a benchmark that transcribes each dataset clip both with and without preprocessing under otherwise identical conditions, and reports accuracy overall and per modulation.</td><td class="ctr"><span class="b b-must">Must</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Demonstration</td></tr>
+    <tr><td class="id-col">FR-8.5</td><td>Benchmark output shall be persisted as machine-readable results and a rendered chart.</td><td class="ctr"><span class="b b-must">Must</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Inspection</td></tr>
+    <tr><td class="id-col">FR-9.1</td><td>All configurable parameters shall be defined in a single validated module, overridable by environment variable or <code>.env</code> file.</td><td class="ctr"><span class="b b-must">Must</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Unit test</td></tr>
+    <tr><td class="id-col">FR-9.2</td><td>Invalid configuration values shall raise a diagnostic naming the offending variable.</td><td class="ctr"><span class="b b-should">Should</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Unit test</td></tr>
+    <tr><td class="id-col">FR-9.3</td><td>The system shall provide an installation verification utility reporting the status of each external dependency independently.</td><td class="ctr"><span class="b b-must">Must</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Demonstration</td></tr>
+    <tr><td class="id-col">FR-9.4</td><td>Per-stage timings shall be recorded to a rotating log for latency analysis.</td><td class="ctr"><span class="b b-should">Should</span></td><td class="ctr"><span class="b b-done">Done</span></td><td>Inspection</td></tr>
+  </tbody>
+</table>
+</div>

@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Local Voice Chatbot — Functional &amp; Technical Specification</title>
+<link rel="stylesheet" href="_doc_style.css">
+</head>
+<body>
+
+<!-- ================= COVER ================= -->
+<div class="cover">
+  <div class="cover-band">
+    <div class="cover-eyebrow">Functional &amp; Technical Specification</div>
+    <h1 class="cover-title" style="border:none;padding:0;color:#fff;">Local Voice Chatbot</h1>
+    <div class="cover-accent-rule"></div>
+    <p class="cover-sub">A modulation-robust, fully offline speech-to-speech assistant integrating
+      on-device speech recognition, a local large language model, and neural text-to-speech.</p>
+  </div>
+  <div class="cover-body">
+    <p class="cover-abstract">
+      This document specifies the functional and non-functional requirements, system architecture,
+      detailed design, verification strategy, experimental evaluation, and ethical assessment of the
+      Local Voice Chatbot system. The system executes a complete speech-to-speech conversational
+      pipeline entirely on local hardware, with no external network dependency at any stage. It
+      incorporates an explicit confidence-gating layer that prevents low-confidence transcriptions
+      from reaching the language model, and a measured, benchmark-driven approach to validating
+      robustness claims — including a documented negative experimental result and the corrective
+      action taken in response to it.
+    </p>
+    <table class="cover-meta">
+      <tr><td>Document ID</td><td>LVC-FTS-001</td></tr>
+      <tr><td>Version</td><td>1.0 (Baselined)</td></tr>
+      <tr><td>Status</td><td>Released for Review</td></tr>
+      <tr><td>Date</td><td>07 September 2026</td></tr>
+      <tr><td>Author</td><td>Sandeep Srinivasan</td></tr>
+      <tr><td>Classification</td><td>Internal — Project Submission</td></tr>
+      <tr><td>Repository</td><td>voice-chatbot (git, branch <code>master</code>, 7 commits at baseline)</td></tr>
+    </table>
+  </div>
+  <div class="cover-foot">
+    <span>LVC-FTS-001 · Version 1.0</span>
+    <span>Functional &amp; Technical Specification</span>
+  </div>
+</div>
+
+<!-- ================= DOC CONTROL ================= -->
+<div class="section">
+<h1><span class="num">§</span>Document Control</h1>
+
+<h2>Revision History</h2>
+<table class="t">
+  <thead><tr><th style="width:18mm">Version</th><th style="width:26mm">Date</th><th style="width:34mm">Author</th><th>Summary of Changes</th></tr></thead>
+  <tbody>
+    <tr><td>0.1</td><td>06 Sep 2026</td><td>S. Srinivasan</td><td>Initial draft: scope, architecture outline, preliminary requirements.</td></tr>
+    <tr><td>0.2</td><td>06 Sep 2026</td><td>S. Srinivasan</td><td>Added detailed design for preprocessing and confidence layers; incorporated GPU enablement findings.</td></tr>
+    <tr><td>0.3</td><td>07 Sep 2026</td><td>S. Srinivasan</td><td>Added experimental evaluation following first full benchmark execution; documented negative result and root-cause analysis.</td></tr>
+    <tr><td><strong>1.0</strong></td><td>07 Sep 2026</td><td>S. Srinivasan</td><td>Baselined. Added verification &amp; validation, security, ethical assessment, operations, and appendices. Aligned with repository state at commit <code>383e028</code>.</td></tr>
+  </tbody>
+</table>
+
+<h2>Approvals</h2>
+<table class="t">
+  <thead><tr><th style="width:40mm">Role</th><th style="width:44mm">Name</th><th style="width:30mm">Date</th><th>Signature</th></tr></thead>
+  <tbody>
+    <tr><td>Author / Developer</td><td>Sandeep Srinivasan</td><td>07 Sep 2026</td><td>&nbsp;</td></tr>
+    <tr><td>Technical Reviewer</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>
+    <tr><td>Approving Authority</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>
+  </tbody>
+</table>
+
+<h2>Distribution</h2>
+<table class="t">
+  <thead><tr><th style="width:52mm">Recipient</th><th style="width:38mm">Format</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td>Engineering Review Panel</td><td>PDF (this document)</td><td>Technical assessment and design review.</td></tr>
+    <tr><td>Project Repository</td><td>Markdown (<code>README.md</code>)</td><td>Condensed operational reference for developers.</td></tr>
+    <tr><td>Reviewer / Assessor</td><td>PDF + source repository</td><td>Evaluation of engineering practice and results.</td></tr>
+  </tbody>
+</table>
+
+<h2>Related Documents</h2>
+<table class="t">
+  <thead><tr><th style="width:34mm">Reference</th><th style="width:50mm">Artefact</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td class="id-col">REF-01</td><td><code>README.md</code></td><td>Operational quick-reference: setup, run modes, benchmark summary.</td></tr>
+    <tr><td class="id-col">REF-02</td><td><code>data/results/benchmark_results.csv</code></td><td>Per-clip raw experimental output of the evaluation described in §12.</td></tr>
+    <tr><td class="id-col">REF-03</td><td><code>data/results/accuracy_comparison.png</code></td><td>Rendered accuracy comparison chart (reproduced as Figure 3).</td></tr>
+    <tr><td class="id-col">REF-04</td><td><code>logs/confidence_log.csv</code></td><td>Audit trail of every confidence-gating decision taken at runtime.</td></tr>
+    <tr><td class="id-col">REF-05</td><td><code>.github/workflows/tests.yml</code></td><td>Continuous integration pipeline definition.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<!-- ================= TOC ================= -->
+<div class="section">
+<h1><span class="num">§</span>Table of Contents</h1>
+<ul class="toc-list">
+  <li><span class="tnum">1</span><span class="ttxt">Executive Summary</span><span class="tdot"></span><span class="tpg">__P1__</span></li>
+  <li><span class="tnum">2</span><span class="ttxt">Introduction</span><span class="tdot"></span><span class="tpg">__P2__</span></li>
+  <li class="sub"><span class="tnum">2.1</span><span class="ttxt">Purpose</span><span class="tdot"></span><span class="tpg">__P2__</span></li>
+  <li class="sub"><span class="tnum">2.2</span><span class="ttxt">Intended Audience</span><span class="tdot"></span><span class="tpg">__P2__</span></li>
+  <li class="sub"><span class="tnum">2.3</span><span class="ttxt">Scope</span><span class="tdot"></span><span class="tpg">__P2__</span></li>
+  <li class="sub"><span class="tnum">2.4</span><span class="ttxt">Definitions, Acronyms and Abbreviations</span><span class="tdot"></span><span class="tpg">__P2B__</span></li>
+  <li><span class="tnum">3</span><span class="ttxt">Product Overview</span><span class="tdot"></span><span class="tpg">__P3__</span></li>
+  <li class="sub"><span class="tnum">3.1</span><span class="ttxt">Problem Statement</span><span class="tdot"></span><span class="tpg">__P3__</span></li>
+  <li class="sub"><span class="tnum">3.2</span><span class="ttxt">Solution Overview</span><span class="tdot"></span><span class="tpg">__P3__</span></li>
+  <li class="sub"><span class="tnum">3.3</span><span class="ttxt">User Characteristics</span><span class="tdot"></span><span class="tpg">__P3B__</span></li>
+  <li class="sub"><span class="tnum">3.4</span><span class="ttxt">Operating Environment</span><span class="tdot"></span><span class="tpg">__P3B__</span></li>
+  <li class="sub"><span class="tnum">3.5</span><span class="ttxt">Constraints, Assumptions and Dependencies</span><span class="tdot"></span><span class="tpg">__P3C__</span></li>
+  <li><span class="tnum">4</span><span class="ttxt">Functional Requirements</span><span class="tdot"></span><span class="tpg">__P4__</span></li>
+  <li><span class="tnum">5</span><span class="ttxt">Non-Functional Requirements</span><span class="tdot"></span><span class="tpg">__P5__</span></li>
+  <li><span class="tnum">6</span><span class="ttxt">Use Cases</span><span class="tdot"></span><span class="tpg">__P6__</span></li>
+  <li><span class="tnum">7</span><span class="ttxt">System Architecture</span><span class="tdot"></span><span class="tpg">__P7__</span></li>
+  <li><span class="tnum">8</span><span class="ttxt">Detailed Design</span><span class="tdot"></span><span class="tpg">__P8__</span></li>
+  <li><span class="tnum">9</span><span class="ttxt">Data Design</span><span class="tdot"></span><span class="tpg">__P9__</span></li>
+  <li><span class="tnum">10</span><span class="ttxt">Interface Specification</span><span class="tdot"></span><span class="tpg">__P10__</span></li>
+  <li><span class="tnum">11</span><span class="ttxt">Verification &amp; Validation</span><span class="tdot"></span><span class="tpg">__P11__</span></li>
+  <li><span class="tnum">12</span><span class="ttxt">Experimental Evaluation</span><span class="tdot"></span><span class="tpg">__P12__</span></li>
+  <li><span class="tnum">13</span><span class="ttxt">Performance Characteristics</span><span class="tdot"></span><span class="tpg">__P13__</span></li>
+  <li><span class="tnum">14</span><span class="ttxt">Security Considerations</span><span class="tdot"></span><span class="tpg">__P14__</span></li>
+  <li><span class="tnum">15</span><span class="ttxt">Ethical Considerations</span><span class="tdot"></span><span class="tpg">__P15__</span></li>
+  <li><span class="tnum">16</span><span class="ttxt">Operations &amp; Deployment</span><span class="tdot"></span><span class="tpg">__P16__</span></li>
+  <li><span class="tnum">17</span><span class="ttxt">Known Limitations</span><span class="tdot"></span><span class="tpg">__P17__</span></li>
+  <li><span class="tnum">18</span><span class="ttxt">Future Work</span><span class="tdot"></span><span class="tpg">__P18__</span></li>
+  <li><span class="tnum">19</span><span class="ttxt">Appendices</span><span class="tdot"></span><span class="tpg">__P19__</span></li>
+</ul>
+
+<h2 style="margin-top:10mm">Figures and Tables</h2>
+<ul class="toc-list">
+  <li><span class="tnum">Fig 1</span><span class="ttxt">End-to-end processing pipeline</span><span class="tdot"></span><span class="tpg">__P7__</span></li>
+  <li><span class="tnum">Fig 2</span><span class="ttxt">Confidence-gating decision state machine</span><span class="tdot"></span><span class="tpg">__P8B__</span></li>
+  <li><span class="tnum">Fig 3</span><span class="ttxt">Recognition accuracy by modulation: raw vs. preprocessed</span><span class="tdot"></span><span class="tpg">__P12B__</span></li>
+</ul>
+</div>
+
+<!-- ================= 1. EXEC SUMMARY ================= -->
+<div class="section">
+<h1><span class="num">1</span>Executive Summary</h1>
+
+<p>The Local Voice Chatbot is a speech-to-speech conversational assistant that runs its entire
+processing chain — speech recognition, language modelling, and speech synthesis — on local
+hardware. No audio, transcript, or generated response is transmitted to any external service at
+any point. The system was developed to address a specific reliability problem in voice interfaces:
+speech recognition models degrade when input is delivered under atypical vocal modulation
+(whispered, shouted, unusually slow or fast), and they typically fail <em>silently</em>, emitting a
+confident but incorrect transcription that downstream components then act upon.</p>
+
+<p>The system addresses this in two layers. First, an audio preprocessing stage normalises input
+before recognition. Second — and more consequentially — a confidence-gating layer inspects the
+recogniser's own token-level log-probability for every utterance and refuses to forward
+low-confidence transcriptions to the language model, instead re-attempting recognition with a wider
+beam search and, failing that, explicitly asking the speaker to repeat. Every such decision is
+written to a persistent audit log.</p>
+
+<div class="metrics">
+  <div class="metric"><div class="mv">96.0%</div><div class="ml">Recognition accuracy across all modulations</div></div>
+  <div class="metric"><div class="mv">42</div><div class="ml">Automated tests, GPU-free, CI-enforced</div></div>
+  <div class="metric"><div class="mv">2.6 GB</div><div class="ml">Peak VRAM, both models resident</div></div>
+  <div class="metric"><div class="mv">0</div><div class="ml">External network calls in the pipeline</div></div>
+</div>
+
+<h2>Principal Outcomes</h2>
+<ul>
+  <li><strong>A complete, working offline pipeline.</strong> Microphone capture with voice-activity
+    detection, GPU-accelerated recognition via <code>faster-whisper</code>, response generation via a
+    locally-served 3-billion-parameter language model, and neural speech synthesis via Piper — all
+    verified operating end-to-end on a 4 GB consumer laptop GPU.</li>
+  <li><strong>A confidence-aware safety layer</strong> that converts silent recognition failures into
+    explicit, recoverable interactions, with a complete audit trail.</li>
+  <li><strong>A documented negative experimental result.</strong> The pitch- and speed-correction
+    components of the preprocessing layer were hypothesised to improve robustness. Benchmarking
+    against a purpose-recorded 25-clip dataset demonstrated the opposite: they reduced accuracy from
+    96.0% to 48.0%. The cause was isolated through controlled ablation, the components were disabled,
+    accuracy was restored to parity, and an automated regression test now prevents the defect from
+    recurring. This result, and the decision taken in response to it, is reported in full in §12.</li>
+  <li><strong>Production-oriented engineering practice:</strong> centralised and validated
+    configuration, a 42-test automated suite with continuous integration, consistent structured error
+    handling, retry semantics on inter-process calls, log rotation, and a production WSGI server
+    option — with the deliberately unimplemented items enumerated honestly in §17.</li>
+</ul>
+
+<div class="callout callout-good">
+  <span class="ct">Principal engineering finding</span>
+  <p>The measured value of this project lies less in the pipeline itself — which is an integration of
+  well-understood components — than in the evidence discipline applied to it. A plausible,
+  intuitively-correct preprocessing technique was implemented, measured, found to be actively
+  harmful, root-caused, removed, and regression-tested. The benchmark existed specifically so that
+  such a claim could be falsified rather than assumed.</p>
+</div>
+</div>

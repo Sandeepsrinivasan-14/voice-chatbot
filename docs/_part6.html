@@ -1,0 +1,253 @@
+<!-- ================= 16. OPERATIONS ================= -->
+<div class="section">
+<h1><span class="num">16</span>Operations &amp; Deployment</h1>
+
+<h2>16.1 Installation</h2>
+<p>Dependencies are layered across three requirement files so that environments not requiring GPU
+acceleration are not obliged to download approximately 1.3 GB of CUDA runtime wheels.</p>
+<table class="t">
+  <thead><tr><th style="width:48mm">File</th><th style="width:26mm">Adds</th><th>Intended use</th></tr></thead>
+  <tbody>
+    <tr><td><code>requirements.txt</code></td><td>Base</td><td>Complete CPU-only operation. Sufficient to run the system.</td></tr>
+    <tr><td><code>requirements-gpu.txt</code></td><td>+ cuBLAS, cuDNN</td><td>GPU-accelerated recognition on the reference configuration.</td></tr>
+    <tr><td><code>requirements-dev.txt</code></td><td>+ pytest, ruff</td><td>Development and continuous integration. Deliberately excludes the GPU wheels.</td></tr>
+  </tbody>
+</table>
+<pre><span class="c"># 1. Create and populate the environment</span>
+python -m venv venv
+venv\Scripts\python.exe -m pip install -r requirements-gpu.txt
+
+<span class="c"># 2. Install the model runtime and pull the model</span>
+ollama pull llama3.2:3b
+
+<span class="c"># 3. Place the Piper voice model at models/piper/</span>
+<span class="c">#    (en_US-lessac-medium.onnx and its .onnx.json)</span>
+
+<span class="c"># 4. Verify every dependency independently</span>
+venv\Scripts\python.exe verify_setup.py</pre>
+<p><code>verify_setup.py</code> reports each of the four dependencies separately, so a single failure
+does not obscure the status of the others. All four report healthy on the reference configuration.</p>
+
+<h2>16.2 Configuration</h2>
+<p>No configuration is required for default operation. To override, copy <code>.env.example</code> to
+<code>.env</code> and edit the relevant entries; every variable is documented in Table 10.3. Values
+are validated at start-up, and an unparseable value raises a diagnostic naming the variable rather
+than failing later in an unrelated component.</p>
+
+<h2>16.3 Operating Modes</h2>
+<table class="t">
+  <thead><tr><th style="width:44mm">Mode</th><th style="width:48mm">Command</th><th>Notes</th></tr></thead>
+  <tbody>
+    <tr><td>Browser interface (primary)</td><td><code>python src/chat_web.py</code></td><td>Open <code>http://localhost:5006</code>. Full conversational interface with multi-turn context.</td></tr>
+    <tr><td>Terminal interface</td><td><code>python src/cli.py</code></td><td>Continuous voice loop with automatic endpointing. Exit by keyword or interrupt.</td></tr>
+    <tr><td>Dataset recorder</td><td><code>python src/record_web.py</code></td><td>Open <code>http://localhost:5005</code>. Required only when constructing an evaluation corpus.</td></tr>
+    <tr><td>Benchmark</td><td><code>python src/benchmark.py</code></td><td>Regenerates REF-02 and REF-03 from the current corpus.</td></tr>
+    <tr><td>Production serving</td><td><code>PRODUCTION=1</code> with either service</td><td>Serves via Waitress instead of the Flask development server. Confirmed by the <code>Server: waitress</code> response header.</td></tr>
+    <tr><td>Test suite</td><td><code>pytest -v</code>, <code>ruff check .</code></td><td>Requires no GPU, model server, microphone, or synthesiser.</td></tr>
+  </tbody>
+</table>
+
+<h2>16.4 Logging and Monitoring</h2>
+<table class="t">
+  <thead><tr><th style="width:48mm">Artefact</th><th style="width:30mm">Rotation</th><th>Use</th></tr></thead>
+  <tbody>
+    <tr><td><code>logs/pipeline.log</code></td><td>5 MB &times; 3 generations</td><td>Per-stage timings, device selection, degradation events.</td></tr>
+    <tr><td><code>logs/confidence_log.csv</code></td><td>None — see RSK-03</td><td>Threshold calibration and gating audit.</td></tr>
+    <tr><td><code>GET /api/health</code></td><td>—</td><td>Liveness and active recognition device.</td></tr>
+  </tbody>
+</table>
+
+<h2>16.5 Troubleshooting Runbook</h2>
+<table class="t">
+  <caption>Table 16.1 — Observed failures and remedies</caption>
+  <thead><tr><th style="width:52mm">Symptom</th><th style="width:52mm">Cause</th><th>Remedy</th></tr></thead>
+  <tbody>
+    <tr><td><code>Library cublas64_12.dll is not found</code> at first inference</td><td>CUDA runtime libraries not on the process search path; construction succeeded but inference cannot (§8.4.2).</td><td>Install <code>requirements-gpu.txt</code>. <code>src/cuda_dlls.py</code> handles path injection automatically thereafter. The system falls back to CPU regardless.</td></tr>
+    <tr><td>Activation script blocked by execution policy</td><td>Windows PowerShell restricts script execution by default.</td><td>Invoke the interpreter directly — <code>venv\Scripts\python.exe &lt;script&gt;</code> — which requires no activation.</td></tr>
+    <tr><td>Recognition device shows no value at start-up</td><td>Expected: the recogniser loads lazily on first use.</td><td>None. The indicator populates after the first transcription.</td></tr>
+    <tr><td>First response markedly slower than subsequent ones</td><td>One-time model residency load in the model runtime.</td><td>None. Communicated to the user by design (NFR-P.5).</td></tr>
+    <tr><td>Diagnostic reporting the model server unreachable</td><td>Ollama not running, or a different address configured.</td><td>Start the Ollama service; confirm <code>OLLAMA_URL</code>.</td></tr>
+    <tr><td>Frequent requests to repeat</td><td>Confidence threshold miscalibrated for this speaker or microphone (§15.3.2).</td><td>Inspect <code>confidence_log.csv</code>; lower <code>CONFIDENCE_THRESHOLD</code> (more negative) if scores cluster just below it.</td></tr>
+    <tr><td>Microphone permission not requested</td><td>Page not served from a secure context.</td><td>Access via <code>localhost</code>, which browsers treat as secure. Any other host requires HTTPS.</td></tr>
+    <tr><td>Port already in use</td><td>A previous instance is still running.</td><td>Terminate it, or set <code>CHAT_WEB_PORT</code> / <code>RECORD_WEB_PORT</code>.</td></tr>
+    <tr><td>Transient <code>MemoryError</code> in preprocessing</td><td>Just-in-time compilation under memory pressure (§8.3.3).</td><td>None required — the stage degrades to unmodified audio and logs the event. Close other memory-intensive applications if persistent.</td></tr>
+  </tbody>
+</table>
+
+<h2>16.6 Offline Verification</h2>
+<p>The system&rsquo;s central claim can be verified directly by the operator: disable all network
+interfaces and repeat a full conversational turn. Behaviour is unchanged, because every dependency
+resolves to a local file or the loopback interface. This is the recommended demonstration of
+NFR-S.1.</p>
+</div>
+
+<!-- ================= 17. KNOWN LIMITATIONS ================= -->
+<div class="section">
+<h1><span class="num">17</span>Known Limitations</h1>
+
+<p>Limitations are recorded with their cause and, where applicable, the section that discusses them in
+depth. Items marked <em>by design</em> are consequences of accepted scope rather than defects.</p>
+
+<table class="t">
+  <caption>Table 17.1 — Known limitations at baseline</caption>
+  <thead><tr><th style="width:20mm">ID</th><th style="width:52mm">Limitation</th><th style="width:22mm" class="ctr">Class</th><th>Detail</th></tr></thead>
+  <tbody>
+    <tr><td class="id-col">LIM-01</td><td>Pitch and rate correction disabled</td><td class="ctr"><span class="b b-part">Evidenced</span></td><td>Demonstrated harmful for isolated command words (§12.4). Detection remains active. Re-enabling requires fresh measurement and defeats a regression test.</td></tr>
+    <tr><td class="id-col">LIM-02</td><td>Confidence threshold calibrated on one speaker</td><td class="ctr"><span class="b b-part">Fairness</span></td><td>May distribute repeat requests unequally across speakers (§15.3.2). Configurable, with an audit trail supporting recalibration.</td></tr>
+    <tr><td class="id-col">LIM-03</td><td>Evaluation limited to 25 clips, one speaker, isolated words</td><td class="ctr"><span class="b b-part">Evidence</span></td><td>Bounds the strength of accuracy claims (§12.7).</td></tr>
+    <tr><td class="id-col">LIM-04</td><td>No authentication or transport encryption</td><td class="ctr"><span class="b b-no">By design</span></td><td>Single-user localhost operation only (RSK-01, RSK-02).</td></tr>
+    <tr><td class="id-col">LIM-05</td><td>Confidence log grows without bound and retains transcribed speech</td><td class="ctr"><span class="b b-must">Open</span></td><td>Retention obligation not discharged (RSK-03, §15.2). Remediation specified but not implemented.</td></tr>
+    <tr><td class="id-col">LIM-06</td><td>Conversation history is not persisted</td><td class="ctr"><span class="b b-no">By design</span></td><td>Browser memory only; lost on reload (§9.3). Also a privacy benefit.</td></tr>
+    <tr><td class="id-col">LIM-07</td><td>Synthesis begins only after generation completes</td><td class="ctr"><span class="b b-should">Open</span></td><td>Sentence-level streaming synthesis would reduce time-to-first-audio. Identified but not implemented.</td></tr>
+    <tr><td class="id-col">LIM-08</td><td>No barge-in</td><td class="ctr"><span class="b b-no">By design</span></td><td>The assistant cannot be interrupted mid-utterance by speech.</td></tr>
+    <tr><td class="id-col">LIM-09</td><td>No wake word</td><td class="ctr"><span class="b b-no">By design</span></td><td>Explicit activation is a deliberate privacy property (§15.2).</td></tr>
+    <tr><td class="id-col">LIM-10</td><td>Single language (English)</td><td class="ctr"><span class="b b-no">By design</span></td><td>Recognition is pinned to English; the voice model is US English.</td></tr>
+    <tr><td class="id-col">LIM-11</td><td>Automated tests do not exercise real GPU, model server, or synthesiser</td><td class="ctr"><span class="b b-part">Accepted</span></td><td>Deliberate trade for CI portability; integration covered manually (§11.5).</td></tr>
+    <tr><td class="id-col">LIM-12</td><td>No screen-reader or assistive-technology testing</td><td class="ctr"><span class="b b-should">Open</span></td><td>Accessibility gap stated rather than assumed satisfied (§15.5).</td></tr>
+    <tr><td class="id-col">LIM-13</td><td>No packaging, installer, or container image</td><td class="ctr"><span class="b b-no">By design</span></td><td>Distribution is by repository clone (§2.3.2).</td></tr>
+    <tr><td class="id-col">LIM-14</td><td>Single concurrent user; no request queueing</td><td class="ctr"><span class="b b-no">By design</span></td><td>Consistent with ASM-01 and RSK-06.</td></tr>
+    <tr><td class="id-col">LIM-15</td><td>Licensing obligations unresolved for redistribution</td><td class="ctr"><span class="b b-must">Open</span></td><td>GPL-3.0 synthesis engine and non-standard model weight terms (§15.8).</td></tr>
+  </tbody>
+</table>
+</div>
+
+<!-- ================= 18. FUTURE WORK ================= -->
+<div class="section">
+<h1><span class="num">18</span>Future Work</h1>
+
+<p>Candidate work is grouped by the objective it serves and ordered by the ratio of expected benefit
+to effort. Items are traceable to the limitation or risk that motivates them.</p>
+
+<h2>18.1 Near Term — closes an identified gap</h2>
+<table class="t">
+  <thead><tr><th style="width:20mm">Ref</th><th style="width:52mm">Item</th><th>Rationale and expected effect</th></tr></thead>
+  <tbody>
+    <tr><td class="id-col">FW-01</td><td>Rotation, retention limit, and redaction mode for the confidence log</td><td>Discharges the retention obligation in §15.2 and closes LIM-05 and RSK-03. Small, self-contained change.</td></tr>
+    <tr><td class="id-col">FW-02</td><td>Sentence-level streaming synthesis</td><td>Begin synthesising the first complete sentence while generation continues; materially reduces time-to-first-audio. Closes LIM-07.</td></tr>
+    <tr><td class="id-col">FW-03</td><td>Filename sanitisation on recorder uploads</td><td>Removes RSK-04 independently of the trust-boundary argument.</td></tr>
+    <tr><td class="id-col">FW-04</td><td>Screen-reader and keyboard-navigation audit</td><td>Converts LIM-12 from an unknown into a measured position.</td></tr>
+  </tbody>
+</table>
+
+<h2>18.2 Medium Term — strengthens the evidence base</h2>
+<table class="t">
+  <thead><tr><th style="width:20mm">Ref</th><th style="width:52mm">Item</th><th>Rationale and expected effect</th></tr></thead>
+  <tbody>
+    <tr><td class="id-col">FW-05</td><td>Multi-speaker evaluation corpus</td><td>Addresses the most significant threat to validity (§12.7) and would quantify the fairness concern in §15.3.2 rather than leaving it as a reasoned inference.</td></tr>
+    <tr><td class="id-col">FW-06</td><td>Adaptive or per-speaker threshold calibration</td><td>Derive the threshold from an initial calibration sample rather than fixing it globally. Directly mitigates LIM-02.</td></tr>
+    <tr><td class="id-col">FW-07</td><td>Continuous-speech benchmark</td><td>The ablation in §12.4 justifies disabling rate correction for isolated words only. A multi-word corpus would establish whether the technique has merit in the regime it was designed for.</td></tr>
+    <tr><td class="id-col">FW-08</td><td>Noise-robustness evaluation</td><td>Extends validity beyond the quiet-environment assumption.</td></tr>
+    <tr><td class="id-col">FW-09</td><td>Latency instrumentation with percentile reporting</td><td>Replaces the indicative single-run figures in §13.1 with distributions.</td></tr>
+  </tbody>
+</table>
+
+<h2>18.3 Longer Term — extends capability</h2>
+<table class="t">
+  <thead><tr><th style="width:20mm">Ref</th><th style="width:52mm">Item</th><th>Rationale and expected effect</th></tr></thead>
+  <tbody>
+    <tr><td class="id-col">FW-10</td><td>Barge-in support</td><td>Allow the speaker to interrupt playback, which is the largest remaining gap against natural conversational rhythm. Closes LIM-08.</td></tr>
+    <tr><td class="id-col">FW-11</td><td>Optional persistent conversation history</td><td>Local storage with explicit user control and an erasure path. Must be weighed against the privacy benefit currently obtained from non-persistence (LIM-06).</td></tr>
+    <tr><td class="id-col">FW-12</td><td>Packaging as a distributable application</td><td>Removes the repository-clone prerequisite. Requires the licensing questions in §15.8 to be resolved first.</td></tr>
+    <tr><td class="id-col">FW-13</td><td>Multilingual recognition and synthesis</td><td>Removes LIM-10; contingent on suitable local voice models.</td></tr>
+    <tr><td class="id-col">FW-14</td><td>Authentication and TLS</td><td>Prerequisite for any deployment beyond a single local user (LIM-04). Note that this trades away the architectural privacy property described in §15.1 and should be undertaken only with that trade explicit.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<!-- ================= 19. APPENDICES ================= -->
+<div class="section">
+<h1><span class="num">19</span>Appendices</h1>
+
+<h2>Appendix A — Source Inventory</h2>
+<table class="t">
+  <thead><tr><th style="width:56mm">Path</th><th style="width:26mm">Category</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td><code>src/config.py</code></td><td>Platform</td><td>Validated configuration singleton.</td></tr>
+    <tr><td><code>src/cuda_dlls.py</code></td><td>Platform</td><td>Windows CUDA library path resolution.</td></tr>
+    <tr><td><code>src/browser_audio.py</code></td><td>Platform</td><td>Browser media decoding to 16 kHz mono PCM.</td></tr>
+    <tr><td><code>src/web_common.py</code></td><td>Platform</td><td>Shared error handlers; serving mode switch.</td></tr>
+    <tr><td><code>src/preprocessing.py</code></td><td>Domain</td><td>Amplitude normalisation; pitch and rate detection.</td></tr>
+    <tr><td><code>src/confidence_check.py</code></td><td>Domain</td><td>Confidence aggregation, decision, audit trail.</td></tr>
+    <tr><td><code>src/pipeline.py</code></td><td>Domain</td><td>Orchestration core for the conversational turn.</td></tr>
+    <tr><td><code>src/chat_web.py</code></td><td>Interface</td><td>Conversational HTTP service.</td></tr>
+    <tr><td><code>src/web_chat/index.html</code></td><td>Interface</td><td>Browser conversational interface.</td></tr>
+    <tr><td><code>src/record_web.py</code></td><td>Interface</td><td>Dataset recorder HTTP service.</td></tr>
+    <tr><td><code>src/web_recorder/index.html</code></td><td>Interface</td><td>Browser recording interface.</td></tr>
+    <tr><td><code>src/cli.py</code></td><td>Interface</td><td>Terminal interface.</td></tr>
+    <tr><td><code>src/record_test_samples.py</code></td><td>Evaluation</td><td>Terminal dataset recorder.</td></tr>
+    <tr><td><code>src/benchmark.py</code></td><td>Evaluation</td><td>Two-condition accuracy measurement.</td></tr>
+    <tr><td><code>verify_setup.py</code></td><td>Evaluation</td><td>Dependency verification.</td></tr>
+    <tr><td><code>tests/</code></td><td>Verification</td><td>42 automated tests across four modules.</td></tr>
+    <tr><td><code>.github/workflows/tests.yml</code></td><td>Verification</td><td>Continuous integration definition.</td></tr>
+  </tbody>
+</table>
+
+<h2>Appendix B — Key Operating Parameters</h2>
+<table class="t">
+  <thead><tr><th style="width:56mm">Parameter</th><th style="width:30mm">Value</th><th>Section</th></tr></thead>
+  <tbody>
+    <tr><td>Sample rate</td><td>16 000 Hz</td><td>§8.2</td></tr>
+    <tr><td>VAD frame duration</td><td>30 ms (480 samples)</td><td>§8.2</td></tr>
+    <tr><td>VAD aggressiveness</td><td>2 of 0–3</td><td>§8.2</td></tr>
+    <tr><td>Trailing silence to end capture</td><td>800 ms</td><td>§8.2</td></tr>
+    <tr><td>Pre-roll retained</td><td>≈300 ms (10 frames)</td><td>§8.2</td></tr>
+    <tr><td>Minimum speech to accept an utterance</td><td>150 ms</td><td>§8.2</td></tr>
+    <tr><td>Maximum capture duration</td><td>15 s</td><td>§8.2</td></tr>
+    <tr><td>Target RMS after normalisation</td><td>0.1</td><td>§8.3.1</td></tr>
+    <tr><td>Pitch outlier band</td><td>80–400 Hz</td><td>§8.3.2</td></tr>
+    <tr><td>Beam size — first pass / retry</td><td>1 / 5</td><td>§8.4.3</td></tr>
+    <tr><td>Confidence threshold</td><td>&minus;0.6</td><td>§8.5.3</td></tr>
+    <tr><td>Conversation history window</td><td>12 messages</td><td>§8.6.2</td></tr>
+    <tr><td>Model server timeout / retries</td><td>180 s / 2</td><td>§8.6.3</td></tr>
+    <tr><td>Maximum upload size</td><td>25 MB</td><td>§14.3</td></tr>
+    <tr><td>Log rotation</td><td>5 MB &times; 3 generations</td><td>§16.4</td></tr>
+  </tbody>
+</table>
+
+<h2>Appendix C — Development History</h2>
+<p>The version-control history records the sequence in which the system was developed and, in the
+case of the fifth commit, preserves the evidence trail for the negative result reported in §12.</p>
+<table class="t">
+  <thead><tr><th style="width:24mm">Commit</th><th style="width:58mm">Summary</th><th>Significance</th></tr></thead>
+  <tbody>
+    <tr><td class="id-col">53efcd8</td><td>Project scaffold</td><td>Repository structure and exclusions.</td></tr>
+    <tr><td class="id-col">7a0a18c</td><td>Pipeline, robustness layer, benchmark, CLI</td><td>Core system implementation.</td></tr>
+    <tr><td class="id-col">427f6c8</td><td>GPU enablement on Windows; TTS-aware system prompt</td><td>Resolves the CUDA library defect (§8.4.2); establishes response shaping (§8.6.1).</td></tr>
+    <tr><td class="id-col">54e742d</td><td>Browser-based dataset recorder</td><td>Enables corpus construction (UC-04).</td></tr>
+    <tr><td class="id-col">e64b26c</td><td><strong>Benchmark reveals preprocessing was reducing accuracy; fix and honest results</strong></td><td>The negative result, root-cause analysis, corrective action, and regression lock-in (§12).</td></tr>
+    <tr><td class="id-col">ec8305a</td><td>Browser conversational interface</td><td>Primary user-facing interface.</td></tr>
+    <tr><td class="id-col">383e028</td><td>Production polish: configuration, tests, CI, error handling, WSGI</td><td>Establishes the engineering baseline described in §11 and §16.</td></tr>
+  </tbody>
+</table>
+
+<h2>Appendix D — Glossary of Decisions</h2>
+<p>A consolidated index of the non-obvious decisions in this document, for reviewers seeking the
+reasoning rather than the specification.</p>
+<table class="t">
+  <thead><tr><th style="width:60mm">Decision</th><th style="width:20mm">Section</th><th>One-line rationale</th></tr></thead>
+  <tbody>
+    <tr><td>RMS rather than peak normalisation</td><td>§8.3.1</td><td>Peak level is driven by a single sample and does not represent sustained loudness.</td></tr>
+    <tr><td>Trial inference before trusting the GPU</td><td>§8.4.1</td><td>Construction succeeds on Windows even when inference cannot; the fault is otherwise latent until first use.</td></tr>
+    <tr><td><code>PATH</code> injection rather than <code>add_dll_directory</code></td><td>§8.4.2</td><td>The conventional API is silently ineffective for <code>LoadLibrary</code>-based resolution.</td></tr>
+    <tr><td>Two-pass decoding rather than a single wide beam</td><td>§8.4.3</td><td>Pays the cost of a wider search only for utterances that need it.</td></tr>
+    <tr><td>Logging accepted decisions as well as rejections</td><td>§8.5.4</td><td>A log of failures alone cannot establish a false-rejection rate.</td></tr>
+    <tr><td>System prompt constraining response form</td><td>§8.6.1</td><td>Structure that aids reading actively harms listening.</td></tr>
+    <tr><td>Retry only before first output</td><td>§8.6.3</td><td>Restarting after partial delivery would duplicate content already seen or heard.</td></tr>
+    <tr><td>Resolving the synthesiser from <code>sys.executable</code></td><td>§8.7</td><td>Removes dependence on shell activation state.</td></tr>
+    <tr><td>Flat files rather than a database</td><td>§9.3</td><td>Evidence artefacts benefit from being directly inspectable at this scale.</td></tr>
+    <tr><td>Mocking all external services in tests</td><td>§11.1</td><td>Portability and determinism, at the acknowledged cost of integration coverage.</td></tr>
+    <tr><td>Disabling pitch and rate correction</td><td>§12.4</td><td>Measurement demonstrated a 48-point accuracy reduction.</td></tr>
+    <tr><td>Declining hosted deployment</td><td>§15.1</td><td>It would forfeit the architectural property that justifies the design.</td></tr>
+  </tbody>
+</table>
+
+<div class="callout" style="margin-top:10mm">
+  <span class="ct">End of document</span>
+  <p>LVC-FTS-001 &middot; Version 1.0 &middot; Local Voice Chatbot — Functional &amp; Technical
+  Specification. Aligned with the repository at commit <code>383e028</code>. Prepared by Sandeep
+  Srinivasan, 07 September 2026.</p>
+</div>
+</div>
+
+</body>
+</html>

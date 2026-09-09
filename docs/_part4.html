@@ -1,0 +1,514 @@
+<!-- ================= 8. DETAILED DESIGN ================= -->
+<div class="section">
+<h1><span class="num">8</span>Detailed Design</h1>
+
+<h2>8.1 Configuration Subsystem</h2>
+<p><code>src/config.py</code> defines a single frozen dataclass, <code>Config</code>, holding every
+tunable parameter in the system. A module-level singleton <code>CONFIG</code> is constructed at import
+time from <code>Config.from_env()</code>, which reads the process environment after
+<code>python-dotenv</code> has loaded any local <code>.env</code> file.</p>
+
+<p>Three properties of this design matter. First, <em>immutability</em>: the dataclass is frozen, so
+configuration cannot drift at runtime. Second, <em>typed coercion with diagnostics</em>: helper
+functions <code>_env_int</code>, <code>_env_float</code> and <code>_env_bool</code> convert string
+environment values and raise a <code>ValueError</code> naming the offending variable if conversion
+fails, rather than failing obscurely later. Third, <em>testability</em>: <code>from_env()</code> is a
+classmethod, so tests construct isolated instances after manipulating the environment without
+mutating the global singleton.</p>
+
+<p>The refactor that introduced this module replaced scattered <code>os.environ.get()</code> calls
+previously duplicated across five modules. Backwards compatibility was preserved deliberately: the
+environment variable names are unchanged, and <code>pipeline.py</code> retains module-level aliases
+(<code>SAMPLE_RATE</code>, <code>OLLAMA_URL</code>, and others) that now resolve to
+<code>CONFIG</code> values, so existing call sites in <code>cli.py</code> and <code>chat_web.py</code>
+required no modification. This confined the change to where configuration is <em>read</em>, not to
+how it is <em>used</em>.</p>
+
+<h2>8.2 Audio Capture and Endpoint Detection</h2>
+<p><code>pipeline.capture_audio()</code> opens a raw 16-bit input stream at 16 kHz and consumes it in
+30 ms frames (480 samples), the frame size required by the WebRTC VAD. A small state machine
+determines utterance boundaries:</p>
+<table class="t">
+  <thead><tr><th style="width:30mm">State</th><th style="width:44mm">Transition condition</th><th>Action</th></tr></thead>
+  <tbody>
+    <tr><td>Untriggered</td><td>Frame classified as speech</td><td>Enter Triggered; prepend the retained pre-roll buffer (10 frames, ≈300 ms) so speech onset is not clipped.</td></tr>
+    <tr><td>Untriggered</td><td>Frame classified as non-speech</td><td>Append to a bounded ring buffer; discard the oldest frame.</td></tr>
+    <tr><td>Triggered</td><td>Frame classified as speech</td><td>Append frame; reset the trailing-silence counter.</td></tr>
+    <tr><td>Triggered</td><td>Consecutive non-speech ≥ 800 ms</td><td>Terminate capture; return the accumulated utterance.</td></tr>
+    <tr><td>Any</td><td>Elapsed time &gt; 15 s</td><td>Terminate capture unconditionally (FR-1.5).</td></tr>
+  </tbody>
+</table>
+<p>An utterance containing fewer than 150 ms of speech frames is discarded as spurious rather than
+transcribed. Captured int16 samples are converted to float32 normalised to &plusmn;1.0 for the
+recogniser.</p>
+
+<h2>8.3 Audio Preprocessing</h2>
+<h3>8.3.1 Amplitude normalisation</h3>
+<p>Normalisation targets a fixed RMS level of 0.1 rather than a fixed peak. RMS was chosen
+deliberately: peak normalisation is driven by the single loudest sample, so a whispered clip
+containing one incidental transient would be scaled as though it were loud, whereas a shouted clip is
+loud throughout. RMS reflects sustained perceived loudness, which is the property that actually
+differs between whispered and shouted delivery.</p>
+<p>Two safeguards apply. Input whose RMS falls below 10<sup>&minus;6</sup> is passed through
+unmodified, avoiding division by near-zero and the consequent amplification of the noise floor. After
+gain is applied, if the resulting peak would exceed 0.99 the signal is rescaled so that it does not
+clip — necessary because a very quiet input attracts a large gain factor.</p>
+
+<h3>8.3.2 Pitch and rate detection</h3>
+<p>Median fundamental frequency is estimated with probabilistic YIN over voiced frames, and flagged
+when outside 80–400 Hz. Speaking rate is estimated from onset density — detected onsets divided by
+clip duration — and flagged when outside 0.75–1.35 times a nominal reference rate.</p>
+
+<div class="callout callout-warn">
+  <span class="ct">Design status — corrections disabled</span>
+  <p>The corresponding <em>correction</em> stages (pitch shifting and time-scale modification) are
+  implemented but disabled by default via <code>ENABLE_PITCH_CORRECTION</code> and
+  <code>ENABLE_SPEED_CORRECTION</code>. Empirical evaluation demonstrated that applying them reduced
+  recognition accuracy from 96.0% to 48.0% on real recordings. The detection and logging paths remain
+  active because the metadata is diagnostically useful; only the audio-modifying step is gated. The
+  full analysis is presented in §12.4, and the behaviour is protected by regression tests (§11.3).</p>
+</div>
+
+<h3>8.3.3 Failure containment</h3>
+<p>The pitch and rate stages call into numba-compiled routines within <code>librosa</code>. Under
+memory pressure — with the recogniser, language model, and synthesiser all resident — that
+just-in-time compilation has been observed to raise <code>MemoryError</code>. Each stage is therefore
+wrapped in its own exception guard that logs the failure, records it in the preprocessing report, and
+returns the audio unmodified. A second guard in the orchestration loop catches anything that escapes
+the first. Preprocessing is an accuracy enhancement, never a precondition for a turn completing.</p>
+
+<h2>8.4 Speech Recognition and Device Selection</h2>
+<h3>8.4.1 Verified device fallback</h3>
+<p><code>load_whisper_model()</code> attempts GPU construction first, then executes a short trial
+transcription over 0.25 s of silence before returning the model. This ordering is not incidental. On
+Windows, <code>WhisperModel(device="cuda")</code> constructs successfully even when the CUDA runtime
+libraries cannot be loaded; the failure surfaces only on the first genuine inference. Validating by
+construction alone would therefore have produced a system that appeared healthy at start-up and
+failed on the user&rsquo;s first utterance. The trial inference converts that latent fault into a
+deterministic start-up check, after which the loader falls back to CPU with an <code>int8</code>
+compute type. The same pattern is applied in <code>verify_setup.py</code> and
+<code>benchmark.py</code>.</p>
+
+<h3>8.4.2 CUDA library resolution on Windows</h3>
+<p><code>src/cuda_dlls.py</code> exists to solve a specific, non-obvious platform defect. The
+CTranslate2 backend requires cuBLAS and cuDNN. On Linux the corresponding
+<code>nvidia-*-cu12</code> wheels are sufficient on their own, because the shared library carries an
+<code>RPATH</code> referring to them. Windows has no <code>RPATH</code> equivalent, and CTranslate2
+resolves these libraries through a plain <code>LoadLibrary</code> call — which does <em>not</em>
+consult directories registered via <code>os.add_dll_directory()</code>, the conventional remedy for
+this class of problem. That approach is silently ineffective here.</p>
+<p>The module therefore locates each installed <code>nvidia.*</code> package, derives its
+<code>bin</code> directory, and prepends it to the process <code>PATH</code> before
+<code>faster_whisper</code> is imported anywhere. Every entry point that loads the recogniser calls
+this function ahead of the relevant import. Without it, the observed failure is
+<code>RuntimeError: Library cublas64_12.dll is not found or cannot be loaded</code> at first
+inference.</p>
+
+<h3>8.4.3 Two-pass decoding</h3>
+<p><code>transcribe()</code> performs a single decode at a caller-supplied beam size, returning both
+the joined text and the raw segment objects, which carry the log-probabilities the confidence layer
+requires. <code>transcribe_with_confidence()</code> composes this with the gating policy: a fast
+first pass at beam 1, and — only where the first pass is judged insufficient — a second pass at beam
+5. The wider search is thus paid for only when it is needed, rather than on every utterance.</p>
+
+<h2>8.5 Confidence Decision Layer</h2>
+<h3>8.5.1 Score aggregation</h3>
+<p>The recogniser reports <code>avg_logprob</code> per segment. These are combined into a single
+utterance score as a duration-weighted mean, so that a long confident segment is not outweighed by a
+short uncertain one. An utterance producing no segments returns &minus;999.0, a sentinel far below any
+plausible threshold, ensuring that silence or undecodable audio is always rejected rather than
+accidentally accepted.</p>
+
+<h3>8.5.2 Decision function</h3>
+<table class="t">
+  <caption>Table 8.1 — Confidence gate decision matrix</caption>
+  <thead><tr><th style="width:34mm">Score vs. threshold</th><th style="width:30mm">Attempt</th><th style="width:38mm">Decision</th><th>Consequence</th></tr></thead>
+  <tbody>
+    <tr><td>At or above threshold</td><td>Either</td><td><code>ACCEPTED</code></td><td>Text forwarded to the language model.</td></tr>
+    <tr><td>Below threshold</td><td>First (beam 1)</td><td><code>RETRY_MORE_BEAMS</code></td><td>Re-decode at beam 5; evaluate again.</td></tr>
+    <tr><td>Below threshold</td><td>Second (beam 5)</td><td><code>ASK_TO_REPEAT</code></td><td>Text discarded; user asked to repeat. The language model is never invoked.</td></tr>
+  </tbody>
+</table>
+<p>The comparison is inclusive (<code>score &gt;= threshold</code>), so a score exactly at the
+threshold is accepted; this boundary is covered by an explicit unit test.</p>
+
+<div class="sm">
+  <div class="sm-row">
+    <div class="sm-node"><b>Decode &mdash; first pass</b><br>Beam size 1; fast path.</div>
+    <div class="sm-link">&nbsp;</div>
+  </div>
+  <div class="sm-down">&darr;</div>
+  <div class="sm-row">
+    <div class="sm-node dec"><b>Evaluate</b><br>Duration-weighted score vs. threshold.</div>
+    <div class="sm-link"><span class="ar">&rarr;</span>at or above threshold</div>
+    <div class="sm-node ok"><b>ACCEPTED</b><br>Text forwarded to the language model.</div>
+  </div>
+  <div class="sm-down">&darr; below threshold</div>
+  <div class="sm-row">
+    <div class="sm-node"><b>Decode &mdash; second pass</b><br>Beam size 5; wider search, higher cost.</div>
+    <div class="sm-link">&nbsp;</div>
+  </div>
+  <div class="sm-down">&darr;</div>
+  <div class="sm-row">
+    <div class="sm-node dec"><b>Re-evaluate</b><br>Same threshold, second attempt.</div>
+    <div class="sm-link"><span class="ar">&rarr;</span>at or above threshold</div>
+    <div class="sm-node ok"><b>ACCEPTED</b><br>Text forwarded to the language model.</div>
+  </div>
+  <div class="sm-down">&darr; still below threshold</div>
+  <div class="sm-row">
+    <div class="sm-node stop term"><b>ASK_TO_REPEAT</b><br>Text discarded. The language model is never
+      invoked; the speaker is asked to repeat.</div>
+    <div class="sm-link">&nbsp;</div>
+  </div>
+  <div class="figcap"><b>Figure 2.</b> Confidence-gating decision state machine. Every transition
+  &mdash; including both acceptance paths &mdash; appends a row to the audit trail described in
+  §8.5.4. The wider second-pass search is executed only for utterances that fail the first
+  evaluation, so its cost is not incurred on the common path.</div>
+</div>
+
+<h3>8.5.3 Threshold selection and calibration</h3>
+<p>The default threshold is &minus;0.6. <code>avg_logprob</code> is not a calibrated probability, so
+the value was chosen from observed behaviour on this project&rsquo;s own recordings, where three bands
+were consistently apparent: above &minus;0.5 the recogniser was essentially always correct; between
+&minus;0.5 and &minus;0.9 it was unreliable; below &minus;0.9 it was typically wrong. Representative
+values observed during system testing were &minus;0.29 for a clean utterance, &minus;0.60 for a
+borderline case that was accepted on the second pass, and &minus;0.85 and &minus;0.88 for inputs
+correctly rejected.</p>
+<div class="callout">
+  <span class="ct">Calibration guidance</span>
+  <p>This distribution shifts with speaker, microphone, and acoustic environment. The
+  <code>confidence_log.csv</code> audit trail exists precisely so the threshold can be re-tuned from
+  evidence: too many spurious repeat requests indicates the threshold should be lowered (more
+  negative); incorrect transcriptions reaching the model indicates it should be raised. This is a
+  known limitation and a documented fairness consideration (§15.3).</p>
+</div>
+
+<h3>8.5.4 Audit trail</h3>
+<p>Every decision — including every acceptance — appends one row to <code>confidence_log.csv</code>,
+recording UTC timestamp, transcribed text, score to four decimal places, threshold in force, decision,
+beam size used, and attempt number. Logging acceptances as well as rejections is deliberate: a log of
+failures alone cannot establish a false-rejection rate.</p>
+
+<h2>8.6 Language Model Integration</h2>
+<h3>8.6.1 Response shaping</h3>
+<p>A system prompt constrains responses to one to three plain conversational sentences and prohibits
+lists, headings, and markup. This is not stylistic preference but a functional requirement of the
+medium: every response is read aloud, where a numbered list becomes an unstructured monologue with
+none of the visual scaffolding that made the structure useful. During model comparison it emerged
+that this prompt constraint improved spoken suitability far more than the choice of model did — both
+candidate models produced structured, list-heavy output without it, and concise spoken prose with it
+(§12.6).</p>
+
+<h3>8.6.2 Transport and context</h3>
+<p>Two integration paths exist. <code>pipeline.generate_response()</code> targets the single-turn
+completion endpoint and is used by the terminal interface. The browser interface instead proxies the
+chat endpoint through <code>chat_web.respond_endpoint()</code>, supplying the system prompt followed
+by the trailing window of conversation history (bounded at twelve messages, approximately six
+exchanges) and the new user message. This gives the browser interface genuine multi-turn memory,
+which the terminal interface does not have — a deliberate asymmetry, since the browser client can
+hold session state that a stateless terminal loop cannot.</p>
+<p>Both paths stream. Tokens are relayed to the caller as they arrive rather than buffered until
+completion, so perceived latency is governed by time-to-first-token.</p>
+
+<h3>8.6.3 Retry semantics</h3>
+<p>Connection failures are retried up to twice with linear backoff, but only under a specific
+condition: no output may yet have been delivered to the caller. Once a partial response has reached
+the user, restarting the request would duplicate content that has already been displayed or spoken,
+so the failure is surfaced instead. This condition is tracked explicitly in both implementations.</p>
+
+<h2>8.7 Speech Synthesis</h2>
+<p><code>synthesize_speech()</code> invokes the Piper executable as a subprocess, writing the text to
+standard input and receiving a WAV file at a specified path. The executable is located relative to
+<code>sys.executable</code> rather than relying on <code>PATH</code>, because the console script is
+installed alongside the interpreter in the virtual environment and is only on <code>PATH</code> if
+that environment has been activated in the calling shell. Resolving relative to the running
+interpreter makes invocation work identically whether or not the environment was activated — a
+concrete robustness improvement that removed a real class of setup failure. A non-zero exit status
+raises a <code>RuntimeError</code> carrying the captured standard error.</p>
+
+<h2>8.8 Web Layer</h2>
+<h3>8.8.1 Shared concerns</h3>
+<p><code>web_common.py</code> supplies both Flask applications with identical error semantics and
+serving behaviour. Handlers for 400, 404, 413 and 500 return a uniform
+<code>{"error": "..."}</code> JSON body in place of Flask&rsquo;s default HTML error pages, so a
+programmatic client receives a parseable response in every case, and internal paths or stack traces
+are never disclosed. <code>run_app()</code> selects between the Flask development server and Waitress
+according to <code>CONFIG.production</code>, allowing a production-grade WSGI server to be used
+without any code change.</p>
+
+<h3>8.8.2 Conversational service</h3>
+<p><code>chat_web.py</code> exposes four endpoints (§10.1). The recogniser is loaded lazily on first
+transcription rather than at import, so start-up is immediate and a model-loading failure presents as
+a clear HTTP error rather than a server that never becomes ready. Request bodies are capped at 25 MB.
+The transcription endpoint mirrors the orchestration core exactly — it calls the same
+<code>normalize_audio()</code> and <code>transcribe_with_confidence()</code> functions the terminal
+interface uses, including the identical preprocessing fallback guard — so the two interfaces cannot
+diverge in behaviour.</p>
+
+<h3>8.8.3 Dataset recorder</h3>
+<p><code>record_web.py</code> serves the recording interface and maintains the dataset manifest. The
+plan endpoint returns the full grid of word and modulation pairs annotated with completion state
+derived from the manifest, enabling the interface to resume at the first incomplete pair after an
+interruption. Uploads are decoded, validated for minimum duration, written as 16 kHz mono WAV, and
+the manifest row is replaced idempotently so that a re-recording overwrites rather than duplicates.</p>
+
+<h2>8.9 Error Handling Strategy</h2>
+<p>The governing principle is that enhancement failures degrade silently while dependency failures
+are surfaced explicitly and actionably.</p>
+<table class="t">
+  <caption>Table 8.2 — Failure modes and designed responses</caption>
+  <thead><tr><th style="width:46mm">Failure</th><th style="width:30mm">Classification</th><th>Designed response</th></tr></thead>
+  <tbody>
+    <tr><td>GPU unusable or CUDA libraries absent</td><td>Degradable</td><td>Trial inference fails; loader falls back to CPU automatically and logs the reason.</td></tr>
+    <tr><td>Preprocessing stage raises</td><td>Degradable</td><td>Logged; unmodified audio proceeds. Two independent guards.</td></tr>
+    <tr><td>Recognition confidence below threshold</td><td>Expected condition</td><td>Retry at wider beam, then request repetition. Never a silent guess.</td></tr>
+    <tr><td>Language model server unreachable</td><td>Dependency</td><td>Bounded retry, then a diagnostic naming the endpoint and the remedy.</td></tr>
+    <tr><td>Synthesis subprocess fails</td><td>Dependency</td><td>HTTP 500 with the captured error; the textual response remains available.</td></tr>
+    <tr><td>Microphone absent or permission denied</td><td>Dependency</td><td>Preflight check reports it before the session begins, with corrective guidance.</td></tr>
+    <tr><td>Voice model file missing</td><td>Dependency</td><td>Preflight check names the expected path and the download source.</td></tr>
+    <tr><td>Upload exceeds size cap</td><td>Client error</td><td>HTTP 413 with a JSON body stating the limit.</td></tr>
+    <tr><td>Invalid configuration value</td><td>Fatal, early</td><td><code>ValueError</code> at start-up naming the offending variable.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<!-- ================= 9. DATA DESIGN ================= -->
+<div class="section">
+<h1><span class="num">9</span>Data Design</h1>
+
+<h2>9.1 Data Inventory</h2>
+<table class="t">
+  <thead><tr><th style="width:40mm">Artefact</th><th style="width:22mm">Format</th><th style="width:26mm">Lifetime</th><th>Contents and sensitivity</th></tr></thead>
+  <tbody>
+    <tr><td><code>data/test_samples/*.wav</code></td><td>WAV, 16 kHz mono</td><td>Persistent, local only</td><td>Recorded speech. <strong>Personal data.</strong> Excluded from version control.</td></tr>
+    <tr><td><code>data/test_samples/manifest.csv</code></td><td>CSV</td><td>Persistent</td><td>Filenames and ground-truth labels. No audio content; safe to commit.</td></tr>
+    <tr><td><code>data/results/benchmark_results.csv</code></td><td>CSV</td><td>Persistent</td><td>Per-clip transcriptions and correctness under both conditions. Contains transcribed words only.</td></tr>
+    <tr><td><code>data/results/accuracy_comparison.png</code></td><td>PNG</td><td>Persistent</td><td>Rendered aggregate results. No personal data.</td></tr>
+    <tr><td><code>logs/confidence_log.csv</code></td><td>CSV</td><td>Persistent, unrotated</td><td>Every gating decision, <strong>including transcribed text</strong>. Excluded from version control.</td></tr>
+    <tr><td><code>logs/pipeline.log</code></td><td>Text</td><td>Rotating, 5 MB &times; 3</td><td>Stage timings and diagnostics. Excluded from version control.</td></tr>
+    <tr><td>Conversation history</td><td>In-memory (browser)</td><td>Session only</td><td>Discarded on page reload. Never written to disk.</td></tr>
+    <tr><td>Synthesis output</td><td>WAV, temporary</td><td>Overwritten per turn</td><td>Transient artefact of the current response.</td></tr>
+  </tbody>
+</table>
+
+<h2>9.2 Schemas</h2>
+<table class="t">
+  <caption>Table 9.1 — <code>manifest.csv</code></caption>
+  <thead><tr><th style="width:38mm">Field</th><th style="width:24mm">Type</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>filename</code></td><td>string</td><td>Clip filename, formatted <code>{word}_{modulation}.wav</code>.</td></tr>
+    <tr><td><code>expected_word</code></td><td>string</td><td>Ground-truth label used to score recognition.</td></tr>
+    <tr><td><code>modulation</code></td><td>enum</td><td>One of <code>normal</code>, <code>whispered</code>, <code>shouted</code>, <code>slow</code>, <code>fast</code>.</td></tr>
+  </tbody>
+</table>
+
+<table class="t">
+  <caption>Table 9.2 — <code>confidence_log.csv</code></caption>
+  <thead><tr><th style="width:38mm">Field</th><th style="width:24mm">Type</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>timestamp</code></td><td>ISO 8601, UTC</td><td>Time the decision was taken.</td></tr>
+    <tr><td><code>text</code></td><td>string</td><td>Transcription under evaluation.</td></tr>
+    <tr><td><code>avg_logprob</code></td><td>float (4 dp)</td><td>Duration-weighted mean segment log-probability.</td></tr>
+    <tr><td><code>threshold</code></td><td>float</td><td>Threshold in force at the time of the decision.</td></tr>
+    <tr><td><code>decision</code></td><td>enum</td><td><code>accepted</code>, <code>retry_more_beams</code>, or <code>ask_to_repeat</code>.</td></tr>
+    <tr><td><code>beam_size_used</code></td><td>integer</td><td>Decoder beam width for this attempt.</td></tr>
+    <tr><td><code>attempt</code></td><td>integer</td><td>Attempt index within the utterance (1 or 2).</td></tr>
+  </tbody>
+</table>
+
+<table class="t">
+  <caption>Table 9.3 — <code>benchmark_results.csv</code></caption>
+  <thead><tr><th style="width:52mm">Field</th><th style="width:20mm">Type</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>filename</code>, <code>expected_word</code>, <code>modulation</code></td><td>string</td><td>Carried through from the manifest.</td></tr>
+    <tr><td><code>raw_transcription</code></td><td>string</td><td>Transcription without preprocessing.</td></tr>
+    <tr><td><code>raw_correct</code></td><td>boolean</td><td>Whether the expected word appears in the normalised raw transcription.</td></tr>
+    <tr><td><code>preprocessed_transcription</code></td><td>string</td><td>Transcription with preprocessing applied.</td></tr>
+    <tr><td><code>preprocessed_correct</code></td><td>boolean</td><td>Correctness under the preprocessed condition.</td></tr>
+  </tbody>
+</table>
+
+<h2>9.3 Design Rationale — No Database</h2>
+<p>The system uses flat files exclusively. This is a considered decision rather than an omission. The
+data volumes are trivial (tens of rows), the access patterns are append-only or whole-file, and every
+persistent artefact benefits from being directly inspectable — the audit log and benchmark results
+are evidence intended to be read by a human, opened in a spreadsheet, or version-controlled. A
+database would add an operational dependency and a schema migration burden for no functional gain at
+this scale. The consequence is accepted and recorded: there is no durable conversation history
+(§17).</p>
+
+<h2>9.4 Retention</h2>
+<p>Nothing is deleted automatically except through log rotation, which retains approximately 20 MB of
+pipeline logs across four generations. The confidence log grows without bound and contains
+transcribed speech; §15.2 addresses the resulting retention obligation, and §17 records it as a known
+limitation.</p>
+</div>
+
+<!-- ================= 10. INTERFACE SPECIFICATION ================= -->
+<div class="section">
+<h1><span class="num">10</span>Interface Specification</h1>
+
+<h2>10.1 Conversational Service HTTP API</h2>
+<p>Base address <code>http://127.0.0.1:5006</code>. All error responses share the body shape
+<code>{"error": "&lt;description&gt;"}</code>.</p>
+
+<table class="t">
+  <caption>Table 10.1 — <code>chat_web.py</code> endpoints</caption>
+  <thead><tr><th style="width:16mm">Method</th><th style="width:32mm">Path</th><th style="width:44mm">Request</th><th>Response</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>GET</td><td><code>/api/health</code></td><td>—</td>
+      <td><code>200</code> &middot; <code>{ok, whisper_device}</code>. <code>whisper_device</code> is <code>null</code> until the recogniser has been loaded lazily.</td>
+    </tr>
+    <tr>
+      <td>POST</td><td><code>/api/transcribe</code></td><td><code>multipart/form-data</code>; field <code>audio</code> containing a WebM/Opus or Ogg/Opus blob.</td>
+      <td><code>200</code> &middot; <code>{text, decision, avg_logprob, threshold, accepted, whisper_device}</code>.<br><code>400</code> if the field is absent, the media cannot be decoded, or the clip is shorter than 200 ms.<br><code>413</code> if the body exceeds 25 MB.</td>
+    </tr>
+    <tr>
+      <td>POST</td><td><code>/api/respond</code></td><td><code>application/json</code> &middot; <code>{message, history[]}</code> where each history entry is <code>{role, content}</code>.</td>
+      <td><code>200</code> &middot; <code>text/plain</code> chunked stream of response tokens. Unreachable-model conditions are emitted as a bracketed diagnostic within the stream, since headers are already committed.<br><code>400</code> if <code>message</code> is empty.</td>
+    </tr>
+    <tr>
+      <td>POST</td><td><code>/api/tts</code></td><td><code>application/json</code> &middot; <code>{text}</code>.</td>
+      <td><code>200</code> &middot; <code>audio/wav</code> byte stream.<br><code>400</code> if <code>text</code> is empty.<br><code>500</code> if synthesis fails.</td>
+    </tr>
+    <tr>
+      <td>GET</td><td><code>/</code>, <code>/&lt;file&gt;</code></td><td>—</td><td>Static interface assets.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>10.2 Dataset Recorder HTTP API</h2>
+<table class="t">
+  <caption>Table 10.2 — <code>record_web.py</code> endpoints</caption>
+  <thead><tr><th style="width:16mm">Method</th><th style="width:32mm">Path</th><th style="width:44mm">Request</th><th>Response</th></tr></thead>
+  <tbody>
+    <tr><td>GET</td><td><code>/api/plan</code></td><td>Optional <code>?words=</code> comma-separated override.</td><td><code>200</code> &middot; <code>{combos[], words[], modulations[]}</code>; each combo carries a <code>done</code> flag enabling resume.</td></tr>
+    <tr><td>POST</td><td><code>/api/upload</code></td><td><code>multipart/form-data</code> &middot; <code>word</code>, <code>modulation</code>, <code>audio</code>.</td><td><code>200</code> &middot; <code>{ok, filename, duration_s}</code>.<br><code>400</code> on invalid label, absent audio, decode failure, or clip under 300 ms.<br><code>413</code> above 25 MB.</td></tr>
+    <tr><td>GET</td><td><code>/api/health</code></td><td>—</td><td><code>200</code> &middot; <code>{ok}</code>.</td></tr>
+  </tbody>
+</table>
+
+<h2>10.3 External Interfaces</h2>
+<table class="t">
+  <thead><tr><th style="width:34mm">Interface</th><th style="width:34mm">Mechanism</th><th>Contract</th></tr></thead>
+  <tbody>
+    <tr><td>Ollama — completion</td><td><code>POST /api/generate</code> over loopback</td><td>Request carries <code>model</code>, <code>prompt</code>, <code>system</code>, <code>stream</code>. Response is newline-delimited JSON; each object supplies a <code>response</code> fragment and a <code>done</code> flag.</td></tr>
+    <tr><td>Ollama — chat</td><td><code>POST /api/chat</code> over loopback</td><td>Request carries <code>model</code> and a <code>messages</code> array of role/content pairs. Response fragments arrive under <code>message.content</code>.</td></tr>
+    <tr><td>Ollama — inventory</td><td><code>GET /api/tags</code></td><td>Used by preflight checks to confirm the configured model is present.</td></tr>
+    <tr><td>Piper</td><td>Subprocess; text on stdin</td><td>Arguments <code>--model</code> and <code>--output_file</code>. Exit status zero indicates success; stderr is captured for diagnostics.</td></tr>
+    <tr><td>Browser capture</td><td><code>getUserMedia</code> + <code>MediaRecorder</code></td><td>Negotiates the first supported MIME type from a preference list, covering both Chromium (WebM/Opus) and Gecko (Ogg/Opus).</td></tr>
+  </tbody>
+</table>
+
+<h2>10.4 Configuration Interface</h2>
+<table class="t">
+  <caption>Table 10.3 — Environment variables (all optional; defaults shown)</caption>
+  <thead><tr><th style="width:48mm">Variable</th><th style="width:40mm">Default</th><th>Effect</th></tr></thead>
+  <tbody>
+    <tr><td><code>WHISPER_MODEL_SIZE</code></td><td><code>small</code></td><td>Recognition model size.</td></tr>
+    <tr><td><code>CONFIDENCE_THRESHOLD</code></td><td><code>-0.6</code></td><td>Gate acceptance threshold.</td></tr>
+    <tr><td><code>CONFIDENCE_LOG_PATH</code></td><td><code>logs/confidence_log.csv</code></td><td>Audit trail location.</td></tr>
+    <tr><td><code>OLLAMA_URL</code></td><td><code>http://localhost:11434</code></td><td>Model server address.</td></tr>
+    <tr><td><code>OLLAMA_MODEL</code></td><td><code>llama3.2:3b</code></td><td>Model identifier.</td></tr>
+    <tr><td><code>PIPER_EXECUTABLE</code></td><td>Resolved from <code>sys.executable</code></td><td>Synthesis binary path.</td></tr>
+    <tr><td><code>PIPER_MODEL_PATH</code></td><td><code>models/piper/en_US-lessac-medium.onnx</code></td><td>Voice model path.</td></tr>
+    <tr><td><code>LOG_DIR</code></td><td><code>logs</code></td><td>Log directory.</td></tr>
+    <tr><td><code>CHAT_WEB_PORT</code></td><td><code>5006</code></td><td>Conversational service port.</td></tr>
+    <tr><td><code>RECORD_WEB_PORT</code></td><td><code>5005</code></td><td>Recorder service port.</td></tr>
+    <tr><td><code>PRODUCTION</code></td><td><code>0</code></td><td>When truthy, serves via Waitress rather than the Flask development server.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<!-- ================= 11. V&V ================= -->
+<div class="section">
+<h1><span class="num">11</span>Verification &amp; Validation</h1>
+
+<h2>11.1 Strategy</h2>
+<p>Verification operates at three levels. <em>Automated unit and integration tests</em> cover
+deterministic logic — confidence arithmetic and decisions, configuration parsing, HTTP endpoint
+contracts, and signal-processing invariants. <em>Manual system testing</em> covers behaviour that
+requires real hardware: microphone capture, GPU inference, model serving, and audio playback.
+<em>Empirical measurement</em> (§12) covers the accuracy claims, which cannot be established by
+testing alone because they are statements about a model&rsquo;s behaviour on real data.</p>
+
+<p>A deliberate constraint governs the automated suite: it must run with no GPU, no model server, no
+microphone, and no synthesis binary. Every external interaction is mocked at its call site. This
+keeps the suite fast, deterministic, and executable on ordinary continuous-integration infrastructure
+— at the cost, honestly acknowledged, that it verifies the system&rsquo;s <em>logic</em> rather than
+its integration with those external components. Integration is covered by §11.5.</p>
+
+<h2>11.2 Automated Test Inventory</h2>
+<table class="t">
+  <caption>Table 11.1 — Automated test suite composition (42 tests, all passing at baseline)</caption>
+  <thead><tr><th style="width:52mm">Module</th><th style="width:16mm" class="ctr">Tests</th><th>Coverage</th></tr></thead>
+  <tbody>
+    <tr><td><code>tests/test_confidence_check.py</code></td><td class="ctr">10</td><td>Score aggregation including empty and zero-duration segments; duration weighting; all three decision branches; threshold boundary inclusivity; audit row content; append rather than overwrite semantics.</td></tr>
+    <tr><td><code>tests/test_preprocessing.py</code></td><td class="ctr">9</td><td>RMS normalisation reaches target; near-silence does not amplify; large gain does not clip; <strong>correction-disabled regression tests</strong> (§11.3); end-to-end robustness on short, silent, and tonal input.</td></tr>
+    <tr><td><code>tests/test_config.py</code></td><td class="ctr">10</td><td>Defaults; immutability enforcement; string, float, integer and boolean overrides; invalid-value diagnostics; equivalence of a clean environment to bare defaults.</td></tr>
+    <tr><td><code>tests/test_chat_web.py</code></td><td class="ctr">13</td><td>Health contract; transcription success, rejection surfacing, decode failure, absent file, and under-length rejection; synthesis success and failure; streaming relay; history forwarding order; unreachable-server handling without retry delay.</td></tr>
+  </tbody>
+</table>
+
+<h2>11.3 Regression Tests of Record</h2>
+<div class="callout callout-good">
+  <span class="ct">Evidence lock-in</span>
+  <p>Two tests in <code>tests/test_preprocessing.py</code> exist specifically to prevent the defect
+  described in §12.4 from recurring. Each forces the detection stage to report a clear outlier — an
+  implausible fundamental frequency, or a single onset across a long clip — and then asserts that the
+  corresponding correction function (<code>pitch_shift</code>, <code>time_stretch</code>) is
+  <strong>never invoked</strong> and that the returned audio is bit-identical to the input. They also
+  assert that both feature flags remain <code>False</code>.</p>
+  <p>The intent is procedural as much as technical: re-enabling either correction now requires
+  deliberately editing a failing test, which forces the change to be justified against new
+  measurement rather than made casually.</p>
+</div>
+
+<h2>11.4 Continuous Integration</h2>
+<p>The workflow at <code>.github/workflows/tests.yml</code> executes on every push and pull request.
+It provisions Python 3.11 on <code>ubuntu-latest</code>, installs
+<code>requirements-dev.txt</code> — deliberately <em>not</em> the GPU requirements, since roughly
+1.3 GB of CUDA wheels serve no purpose where every GPU path is mocked — then runs
+<code>ruff check .</code> followed by <code>pytest -v</code>. Lint findings and test failures both
+fail the build.</p>
+
+<h2>11.5 System Testing Performed</h2>
+<table class="t">
+  <caption>Table 11.2 — Manual verification record</caption>
+  <thead><tr><th style="width:20mm">ID</th><th style="width:52mm">Test</th><th>Result</th></tr></thead>
+  <tbody>
+    <tr><td class="id-col">ST-01</td><td>Installation verification across all four dependencies.</td><td><strong>Pass</strong> — 4/4 reported healthy, re-executed after the configuration refactor to confirm no regression.</td></tr>
+    <tr><td class="id-col">ST-02</td><td>End-to-end pipeline on synthesised input: recognition, gating, generation, synthesis.</td><td><strong>Pass</strong> — all stages completed; recognition executed on CUDA in 0.85 s.</td></tr>
+    <tr><td class="id-col">ST-03</td><td>Confidence rejection path with non-speech input.</td><td><strong>Pass</strong> — spurious transcription scored &minus;0.88, correctly refused, repeat request issued; no model invocation occurred.</td></tr>
+    <tr><td class="id-col">ST-04</td><td>Co-residency of recogniser and language model within the VRAM budget.</td><td><strong>Pass</strong> — 2 592 MiB peak of 4 096 MiB available.</td></tr>
+    <tr><td class="id-col">ST-05</td><td>Multi-turn context retention through the chat endpoint.</td><td><strong>Pass</strong> — a follow-up question referencing the prior turn was answered correctly from history.</td></tr>
+    <tr><td class="id-col">ST-06</td><td>Production serving mode via Waitress.</td><td><strong>Pass</strong> — confirmed by the <code>Server: waitress</code> response header; endpoints functioned unchanged.</td></tr>
+    <tr><td class="id-col">ST-07</td><td>Upload size enforcement using a 26 MB payload against the 25 MB cap.</td><td><strong>Pass</strong> — HTTP 413 with the expected JSON body.</td></tr>
+    <tr><td class="id-col">ST-08</td><td>Uniform JSON error shape on an unknown route.</td><td><strong>Pass</strong> — HTTP 404 returned <code>{"error": "Not found."}</code> rather than an HTML page.</td></tr>
+    <tr><td class="id-col">ST-09</td><td>Browser interface state transitions under a synthetic media stream.</td><td><strong>Pass</strong> — two CSS defects and one event-ordering defect were identified and corrected during this test.</td></tr>
+    <tr><td class="id-col">ST-10</td><td>Recorder resume after interruption.</td><td><strong>Pass</strong> — completed clips detected; session resumed at the first incomplete pair.</td></tr>
+    <tr><td class="id-col">ST-11</td><td>Live conversational session by the primary user.</td><td><strong>Pass with observation</strong> — one presentation defect (device badge displaying a placeholder before lazy load) was reported and corrected.</td></tr>
+  </tbody>
+</table>
+
+<h2>11.6 Requirements Traceability</h2>
+<table class="t">
+  <caption>Table 11.3 — Traceability from requirement to evidence</caption>
+  <thead><tr><th style="width:44mm">Requirement group</th><th style="width:40mm">Verification method</th><th>Evidence</th></tr></thead>
+  <tbody>
+    <tr><td>FR-1.x Capture</td><td>Demonstration, inspection</td><td>ST-02, ST-11; capture state machine reviewed (§8.2).</td></tr>
+    <tr><td>FR-2.x Preprocessing</td><td>Unit and regression tests</td><td><code>test_preprocessing.py</code> (9 tests), §11.3.</td></tr>
+    <tr><td>FR-3.x Recognition</td><td>Demonstration, unit tests</td><td>ST-01, ST-02, ST-04; device fallback verified in situ (§8.4.1).</td></tr>
+    <tr><td>FR-4.x Confidence gating</td><td>Unit tests, demonstration</td><td><code>test_confidence_check.py</code> (10 tests), ST-03.</td></tr>
+    <tr><td>FR-5.x Generation</td><td>Integration tests, demonstration</td><td><code>test_chat_web.py</code> streaming and history tests, ST-05.</td></tr>
+    <tr><td>FR-6.x, FR-7.x Synthesis and interfaces</td><td>Demonstration</td><td>ST-02, ST-09, ST-11.</td></tr>
+    <tr><td>FR-8.x Evaluation tooling</td><td>Demonstration, inspection</td><td>ST-10; benchmark artefacts REF-02 and REF-03.</td></tr>
+    <tr><td>FR-9.x Configuration and operations</td><td>Unit tests, demonstration</td><td><code>test_config.py</code> (10 tests), ST-01, ST-06.</td></tr>
+    <tr><td>NFR-P.x Performance</td><td>Measurement</td><td>§13; ST-02, ST-04.</td></tr>
+    <tr><td>NFR-R.x Reliability</td><td>Unit tests, inspection</td><td>Fallback guards (§8.9); preprocessing containment tests.</td></tr>
+    <tr><td>NFR-S.x Security</td><td>Demonstration, inspection</td><td>ST-07, ST-08; bind address and exclusion rules inspected.</td></tr>
+    <tr><td>NFR-M.x Maintainability</td><td>Automated</td><td>CI pipeline: 42 tests plus lint, green at baseline.</td></tr>
+  </tbody>
+</table>
+</div>

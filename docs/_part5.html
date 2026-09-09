@@ -1,0 +1,451 @@
+<!-- ================= 12. EXPERIMENTAL EVALUATION ================= -->
+<div class="section">
+<h1><span class="num">12</span>Experimental Evaluation</h1>
+
+<p>This section reports the empirical evaluation of the system&rsquo;s central design hypothesis. The
+result was negative: the preprocessing layer, as originally implemented, substantially degraded
+recognition accuracy rather than improving it. The hypothesis, the measurement, the root-cause
+analysis, the corrective action, and the re-validation are reported in full.</p>
+
+<h2>12.1 Hypothesis</h2>
+<p>The design premise stated in §3.1 was that normalising loudness, pitch, and speaking rate before
+recognition would reduce the acoustic distance between modulated and typical speech, and would
+therefore improve recognition accuracy under whispered, shouted, slow, and fast delivery. The
+benchmark was constructed specifically so that this claim could be falsified rather than assumed.</p>
+
+<h2>12.2 Method</h2>
+<table class="t">
+  <thead><tr><th style="width:40mm">Aspect</th><th>Definition</th></tr></thead>
+  <tbody>
+    <tr><td>Design</td><td>Within-subject, two-condition comparison. Every clip is transcribed twice — once unprocessed, once preprocessed — with all other parameters held constant.</td></tr>
+    <tr><td>Independent variable</td><td>Application of the preprocessing layer (absent / present).</td></tr>
+    <tr><td>Dependent variable</td><td>Word recognition accuracy: the proportion of clips whose normalised transcription contains the expected word.</td></tr>
+    <tr><td>Controlled</td><td>Identical model (<code>small</code>), identical compute type, identical beam size (5 in both conditions), identical language setting, identical audio source.</td></tr>
+    <tr><td>Scoring</td><td>Case-insensitive; punctuation stripped; the expected word must appear as a discrete token. This tolerates trailing punctuation and filler while rejecting substitutions.</td></tr>
+    <tr><td>Execution</td><td><code>python src/benchmark.py</code>. Results written to <code>benchmark_results.csv</code>; chart rendered to <code>accuracy_comparison.png</code>.</td></tr>
+  </tbody>
+</table>
+
+<h2>12.3 Dataset</h2>
+<p>A purpose-recorded corpus of 25 clips: five command words — <em>yes, no, stop, help, start</em> —
+each spoken in five modulations: normal, whispered, shouted, slow, and fast. All clips were recorded
+by a single speaker through the browser recorder in a quiet domestic environment, at 16 kHz mono. The
+corpus is small, and §12.7 addresses the resulting limits on inference.</p>
+
+<h2>12.4 Result and Root-Cause Analysis</h2>
+<p>The first execution against real recordings produced the following:</p>
+
+<table class="t">
+  <caption>Table 12.1 — Initial benchmark result (preprocessing as originally implemented)</caption>
+  <thead><tr><th style="width:38mm">Modulation</th><th class="num-col" style="width:32mm">Raw accuracy</th><th class="num-col" style="width:34mm">With preprocessing</th><th class="num-col" style="width:24mm">Delta</th></tr></thead>
+  <tbody>
+    <tr><td>Normal</td><td class="num-col">100.0%</td><td class="num-col">40.0%</td><td class="num-col">&minus;60.0</td></tr>
+    <tr><td>Whispered</td><td class="num-col">100.0%</td><td class="num-col">60.0%</td><td class="num-col">&minus;40.0</td></tr>
+    <tr><td>Shouted</td><td class="num-col">100.0%</td><td class="num-col">40.0%</td><td class="num-col">&minus;60.0</td></tr>
+    <tr><td>Slow</td><td class="num-col">80.0%</td><td class="num-col">60.0%</td><td class="num-col">&minus;20.0</td></tr>
+    <tr><td>Fast</td><td class="num-col">100.0%</td><td class="num-col">40.0%</td><td class="num-col">&minus;60.0</td></tr>
+    <tr><td><strong>Overall</strong></td><td class="num-col"><strong>96.0%</strong></td><td class="num-col"><strong>48.0%</strong></td><td class="num-col"><strong>&minus;48.0</strong></td></tr>
+  </tbody>
+</table>
+
+<div class="callout callout-bad">
+  <span class="ct">Negative result</span>
+  <p>Preprocessing halved recognition accuracy. The degradation was not confined to the modulated
+  conditions it was designed to assist — accuracy under <em>normal</em> delivery fell by 60 points,
+  which is definitive evidence of a defect rather than a tuning deficiency. Representative failures
+  included <em>stop</em> transcribed as &ldquo;So&hellip;&rdquo;, <em>help</em> as &ldquo;L L L&rdquo;,
+  and one clip returning an empty transcription.</p>
+</div>
+
+<h3>12.4.1 Ablation</h3>
+<p>Rather than adjusting parameters speculatively, the contribution of each stage was isolated by
+disabling stages individually and re-running the full corpus:</p>
+
+<table class="t">
+  <caption>Table 12.2 — Controlled ablation of preprocessing stages</caption>
+  <thead><tr><th style="width:56mm">Configuration</th><th class="num-col" style="width:26mm">Accuracy</th><th>Interpretation</th></tr></thead>
+  <tbody>
+    <tr><td>No preprocessing (baseline)</td><td class="num-col">96.0%</td><td>Reference condition.</td></tr>
+    <tr><td>Volume + pitch + speed (as shipped initially)</td><td class="num-col">48.0%</td><td>Severe degradation.</td></tr>
+    <tr><td>Volume + pitch (speed correction disabled)</td><td class="num-col">92.0%</td><td>Recovers most of the loss: speed correction is the dominant cause.</td></tr>
+    <tr><td>Volume only (pitch and speed disabled)</td><td class="num-col">96.0%</td><td>Exact parity with baseline: pitch correction is a secondary contributor; amplitude normalisation is neutral.</td></tr>
+  </tbody>
+</table>
+
+<h3>12.4.2 Cause — speed correction</h3>
+<p>Speaking rate was estimated as onset density: detected onsets divided by total clip duration,
+compared against a nominal reference. This measure is only meaningful over continuous multi-syllable
+speech, where enough onsets accumulate to form a stable estimate. Applied to an isolated single
+command word it fails in two compounding ways. The word contributes approximately one onset, so the
+numerator is a sample of size one. The denominator is the entire recorded clip, most of which is
+silence surrounding the word — so the estimate is governed principally by how much padding the
+recording happens to contain, not by how quickly the speaker spoke.</p>
+<p>The consequence was systematic misclassification. Every clip, in every modulation, was labelled
+&ldquo;slow&rdquo;. The clearest illustration is <code>start_fast</code>, genuinely spoken quickly,
+which was assigned a rate ratio of 0.22 — classified as extremely slow — and then time-stretched
+<em>further in the wrong direction</em>, producing audio degraded past intelligibility and an empty
+transcription. The design defect is precisely the violation of assumption ASM-03: a technique valid
+for continuous speech was applied to isolated words.</p>
+
+<h3>12.4.3 Cause — pitch correction</h3>
+<p>Pitch tracking on short, consonant-heavy words proved unreliable. On one <em>start</em> clip the
+tracker reported a median fundamental of 766 Hz — implausible for this speaker and consistent with
+locking onto a plosive or fricative burst rather than voiced phonation. The system then
+&ldquo;corrected&rdquo; a pitch anomaly that did not exist, damaging a word that required no
+intervention.</p>
+
+<h2>12.5 Corrective Action and Re-validation</h2>
+<p>Both correction stages were disabled by default through explicit feature flags. Detection and
+logging were retained, since the metadata remains diagnostically useful and carries no risk when it
+does not modify the signal. The benchmark was then re-executed unchanged:</p>
+
+<table class="t">
+  <caption>Table 12.3 — Benchmark result after corrective action (current baseline)</caption>
+  <thead><tr><th style="width:38mm">Modulation</th><th class="num-col" style="width:32mm">Raw accuracy</th><th class="num-col" style="width:34mm">With preprocessing</th><th class="num-col" style="width:24mm">Delta</th></tr></thead>
+  <tbody>
+    <tr><td>Normal</td><td class="num-col">100.0%</td><td class="num-col">100.0%</td><td class="num-col">0.0</td></tr>
+    <tr><td>Whispered</td><td class="num-col">100.0%</td><td class="num-col">100.0%</td><td class="num-col">0.0</td></tr>
+    <tr><td>Shouted</td><td class="num-col">100.0%</td><td class="num-col">100.0%</td><td class="num-col">0.0</td></tr>
+    <tr><td>Slow</td><td class="num-col">80.0%</td><td class="num-col">80.0%</td><td class="num-col">0.0</td></tr>
+    <tr><td>Fast</td><td class="num-col">100.0%</td><td class="num-col">100.0%</td><td class="num-col">0.0</td></tr>
+    <tr><td><strong>Overall</strong></td><td class="num-col"><strong>96.0%</strong></td><td class="num-col"><strong>96.0%</strong></td><td class="num-col"><strong>0.0</strong></td></tr>
+  </tbody>
+</table>
+
+<div class="figure">
+  <img src="__CHART_DATA_URI__" alt="Bar chart comparing raw and preprocessed recognition accuracy across five modulations">
+  <div class="figcap"><b>Figure 3.</b> Recognition accuracy by modulation, raw versus preprocessed,
+  after corrective action. Parity across all conditions confirms that the remaining preprocessing
+  stage (amplitude normalisation) introduces no regression. Generated by
+  <code>src/benchmark.py</code>; source data at REF-02.</div>
+</div>
+
+<p>The single residual failure is <code>help_slow</code>, transcribed as &ldquo;L&rdquo; under both
+conditions. Because it fails identically with and without preprocessing, it is a limitation of the
+recognition model on that particular utterance, not an artefact of the pipeline. It is retained in
+the corpus rather than removed.</p>
+
+<h2>12.6 Secondary Evaluation — Language Model Selection</h2>
+<p>Two candidate models of comparable size were compared directly under identical prompts.</p>
+<table class="t">
+  <thead><tr><th style="width:34mm">Probe</th><th style="width:44mm"><code>llama3.2:3b</code></th><th><code>qwen2.5:3b-instruct</code></th></tr></thead>
+  <tbody>
+    <tr><td>Arithmetic (17 &times; 24)</td><td>408 — correct</td><td>388 — <strong>incorrect</strong> on first trial; correct on a later trial, indicating instability rather than consistent capability.</td></tr>
+    <tr><td>Explanatory prose, unconstrained</td><td>Correct but verbose</td><td>Correct and more concise</td></tr>
+    <tr><td>Conversational suitability, unconstrained</td><td>Four-point numbered list — unusable when read aloud</td><td>Terse to the point of curtness</td></tr>
+    <tr><td>Same probe, with system prompt applied</td><td>Natural spoken phrasing, numbers verbalised</td><td>Correct but clipped</td></tr>
+  </tbody>
+</table>
+<div class="callout">
+  <span class="ct">Finding</span>
+  <p>The dominant factor in spoken-response quality was not model selection but prompt construction.
+  Both models produced output unsuitable for audio delivery until the system prompt constrained form;
+  both produced acceptable output afterwards. <code>llama3.2:3b</code> was selected on arithmetic
+  reliability and more natural spoken phrasing, but the generalisable conclusion is that
+  medium-appropriate prompt design outweighed a model swap at this scale.</p>
+</div>
+
+<h2>12.7 Threats to Validity</h2>
+<table class="t">
+  <thead><tr><th style="width:34mm">Threat</th><th style="width:22mm">Type</th><th>Assessment</th></tr></thead>
+  <tbody>
+    <tr><td>Small corpus (n = 25)</td><td>Statistical conclusion</td><td>A single clip shifts overall accuracy by 4 percentage points and a per-modulation figure by 20. The 48-point degradation is far outside this margin and is therefore robust; the post-correction parity is correspondingly less precise, establishing &ldquo;no material regression&rdquo; rather than exact equivalence.</td></tr>
+    <tr><td>Single speaker</td><td>External</td><td>Results characterise this system with this voice. Accuracy and the appropriate confidence threshold may differ for other speakers, accents, and vocal ranges. This is also a fairness concern (§15.3).</td></tr>
+    <tr><td>Isolated words only</td><td>External</td><td>Findings do not transfer to continuous speech. Notably, the failure mode identified in §12.4.2 would not necessarily occur with multi-syllable utterances — the ablation justifies disabling the correction <em>for this workload</em>, not condemning the technique generally.</td></tr>
+    <tr><td>Quiet recording environment</td><td>External</td><td>Robustness under background noise, reverberation, or competing speakers is untested.</td></tr>
+    <tr><td>Substring-based scoring</td><td>Construct</td><td>Scoring rewards presence of the expected token, not exact transcription. Appropriate for command-word recognition; it would be inadequate for measuring full-sentence accuracy, where word error rate would be required.</td></tr>
+    <tr><td>Non-blinded execution</td><td>Internal</td><td>Conditions were executed by the same automated script within one run, with the scoring function identical across conditions, which mitigates differential handling. No manual judgement entered the scoring.</td></tr>
+  </tbody>
+</table>
+
+<h2>12.8 Conclusions Drawn</h2>
+<ol>
+  <li>The recognition model is already substantially robust to vocal modulation on isolated command
+    words: 96% accuracy with no preprocessing whatsoever, and perfect accuracy in four of five
+    conditions.</li>
+  <li>Amplitude normalisation is safe but, on this corpus, unnecessary — the model handled the
+    loudness range unaided. It is retained because it is neutral and would plausibly matter under a
+    wider dynamic range than this corpus exhibits.</li>
+  <li>Pitch and rate correction, as implemented, were actively harmful for this workload and have been
+    disabled with the evidence recorded and a regression test enforcing the decision.</li>
+  <li>The residual robustness value of the system therefore lies in the confidence-gating layer, which
+    addresses the failure mode identified in §3.1 directly and is not captured by this accuracy
+    benchmark.</li>
+  <li>Most significantly for engineering practice: the benchmark earned its cost by falsifying the
+    project&rsquo;s own design hypothesis. Had it not been built, a plausible but harmful component
+    would have shipped with an unverified claim of improvement attached to it.</li>
+</ol>
+</div>
+
+<!-- ================= 13. PERFORMANCE ================= -->
+<div class="section">
+<h1><span class="num">13</span>Performance Characteristics</h1>
+
+<h2>13.1 Latency</h2>
+<p>Measured on the reference configuration (§3.4). Figures are indicative single-run observations
+from system testing, not statistically-sampled distributions; they are reported as such.</p>
+<table class="t">
+  <thead><tr><th style="width:44mm">Stage</th><th class="num-col" style="width:30mm">Observed</th><th>Notes</th></tr></thead>
+  <tbody>
+    <tr><td>Audio capture</td><td class="num-col">Speaker-determined</td><td>Terminated ~800 ms after speech ends; not a processing cost.</td></tr>
+    <tr><td>Preprocessing</td><td class="num-col">&lt; 0.1 s</td><td>Amplitude normalisation only; detection stages dominate but remain sub-second.</td></tr>
+    <tr><td>Recognition (GPU, beam 1)</td><td class="num-col">0.85 s</td><td>Short utterance, <code>small</code> model, <code>int8_float16</code>.</td></tr>
+    <tr><td>Recognition (CPU fallback)</td><td class="num-col">Several seconds</td><td>Functional but materially slower; fallback path only.</td></tr>
+    <tr><td>Generation — first response (cold)</td><td class="num-col">11–20 s</td><td>Includes one-time model residency load.</td></tr>
+    <tr><td>Generation — subsequent (warm)</td><td class="num-col">1–3 s</td><td>Perceived latency lower still, as output streams.</td></tr>
+    <tr><td>Synthesis</td><td class="num-col">~1 s</td><td>CPU-bound; scales with response length.</td></tr>
+    <tr><td>Recogniser load (first request)</td><td class="num-col">One-time</td><td>Deferred to first use; signalled to the user rather than blocking start-up.</td></tr>
+  </tbody>
+</table>
+
+<h2>13.2 Resource Utilisation</h2>
+<table class="t">
+  <caption>Table 13.1 — VRAM budget under the 4 096 MiB constraint (CON-02)</caption>
+  <thead><tr><th style="width:52mm">Condition</th><th class="num-col" style="width:30mm">VRAM in use</th><th>Notes</th></tr></thead>
+  <tbody>
+    <tr><td>Language model resident, recogniser unloaded</td><td class="num-col">2 154 MiB</td><td>Ollama retains the model between requests.</td></tr>
+    <tr><td>Both models resident (measured peak)</td><td class="num-col">2 592 MiB</td><td>Recogniser contributes ≈438 MiB at <code>int8_float16</code>.</td></tr>
+    <tr><td>Headroom remaining</td><td class="num-col">≈1 504 MiB</td><td>Sufficient for display, compositor, and transient allocations.</td></tr>
+  </tbody>
+</table>
+<p>Quantisation is what makes co-residency viable. The recogniser at <code>int8_float16</code>
+occupies roughly half of what half-precision would require, and the language model at Q4_K_M
+occupies approximately 2 GB against roughly 6.4 GB unquantised. Without both choices the 4 GB
+constraint could not be met.</p>
+
+<h2>13.3 Storage</h2>
+<table class="t">
+  <thead><tr><th style="width:52mm">Artefact</th><th class="num-col" style="width:26mm">Size</th><th>Notes</th></tr></thead>
+  <tbody>
+    <tr><td>Python environment</td><td class="num-col">≈780 MB</td><td>Excluding optional CUDA wheels.</td></tr>
+    <tr><td>CUDA runtime wheels (optional)</td><td class="num-col">≈1.3 GB</td><td>cuBLAS 553 MB, cuDNN 732 MB, NVRTC 76 MB. Required only for GPU acceleration.</td></tr>
+    <tr><td>Language model</td><td class="num-col">2.0 GB</td><td>Managed by Ollama outside the project tree.</td></tr>
+    <tr><td>Recognition model</td><td class="num-col">≈500 MB</td><td>Cached on first use.</td></tr>
+    <tr><td>Voice model</td><td class="num-col">≈60 MB</td><td>ONNX plus configuration.</td></tr>
+    <tr><td>Evaluation corpus</td><td class="num-col">≈2.5 MB</td><td>25 clips; excluded from version control.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<!-- ================= 14. SECURITY ================= -->
+<div class="section">
+<h1><span class="num">14</span>Security Considerations</h1>
+
+<h2>14.1 Trust Boundary</h2>
+<p>The system defines a single trust boundary: the host machine. Everything inside it — the browser,
+the application server, the model server, the synthesiser, and the filesystem — is treated as
+trusted. Nothing crosses the boundary. This is the system&rsquo;s principal security property and its
+principal simplifying assumption: the design is sound precisely as long as that boundary holds, and
+degrades sharply if the service is exposed beyond it.</p>
+
+<h2>14.2 Assets</h2>
+<table class="t">
+  <thead><tr><th style="width:44mm">Asset</th><th style="width:24mm">Sensitivity</th><th>Exposure</th></tr></thead>
+  <tbody>
+    <tr><td>Live microphone audio</td><td>High — biometric, personal</td><td>Held in memory during a turn; never written to disk in conversational operation.</td></tr>
+    <tr><td>Recorded evaluation corpus</td><td>High — biometric</td><td>Persisted on local disk; excluded from version control.</td></tr>
+    <tr><td>Transcribed text</td><td>Moderate to high</td><td>Persisted indefinitely in the confidence audit log.</td></tr>
+    <tr><td>Conversation history</td><td>Moderate</td><td>Browser memory only; discarded on reload.</td></tr>
+    <tr><td>Model weights</td><td>Low</td><td>Publicly distributed artefacts.</td></tr>
+  </tbody>
+</table>
+
+<h2>14.3 Controls Implemented</h2>
+<table class="t">
+  <thead><tr><th style="width:20mm">ID</th><th style="width:44mm">Control</th><th>Effect</th></tr></thead>
+  <tbody>
+    <tr><td class="id-col">SEC-01</td><td>Loopback-only binding</td><td>Services are unreachable from other hosts on the network.</td></tr>
+    <tr><td class="id-col">SEC-02</td><td>No outbound network calls</td><td>Eliminates exfiltration paths and third-party data processing entirely.</td></tr>
+    <tr><td class="id-col">SEC-03</td><td>Request size cap (25 MB)</td><td>Bounds memory and disk consumption from a single request; returns HTTP 413.</td></tr>
+    <tr><td class="id-col">SEC-04</td><td>Structured error responses</td><td>Prevents disclosure of stack traces, filesystem paths, and internal structure.</td></tr>
+    <tr><td class="id-col">SEC-05</td><td>Input validation on labels</td><td>Modulation values are checked against an allow-list before use in filenames.</td></tr>
+    <tr><td class="id-col">SEC-06</td><td>Production WSGI server option</td><td>Avoids reliance on a development server explicitly documented as unsuitable for production.</td></tr>
+    <tr><td class="id-col">SEC-07</td><td>Version-control exclusions</td><td>Voice recordings and logs containing transcribed speech cannot be committed accidentally.</td></tr>
+    <tr><td class="id-col">SEC-08</td><td>Bounded conversation context</td><td>History sent to the model is capped, limiting inadvertent propagation of earlier content.</td></tr>
+  </tbody>
+</table>
+
+<h2>14.4 Accepted Risks</h2>
+<table class="t">
+  <thead><tr><th style="width:20mm">ID</th><th style="width:44mm">Risk</th><th>Justification and mitigation</th></tr></thead>
+  <tbody>
+    <tr><td class="id-col">RSK-01</td><td>No authentication or authorisation</td><td>Any local process or user able to reach <code>127.0.0.1:5006</code> can use the service. Accepted for single-user local operation; documented as a hard blocker for any networked deployment (§2.3.2).</td></tr>
+    <tr><td class="id-col">RSK-02</td><td>No transport encryption</td><td>Traffic is loopback-only and does not traverse a network. HTTPS would be mandatory for any other topology, both for confidentiality and because microphone access requires a secure context.</td></tr>
+    <tr><td class="id-col">RSK-03</td><td>Unbounded audit log growth</td><td>The confidence log retains transcribed speech indefinitely with no rotation or purge. Accepted at present scale; recorded as a limitation (§17) with retention guidance in §15.2.</td></tr>
+    <tr><td class="id-col">RSK-04</td><td>Filename construction from request input</td><td>The modulation component is allow-listed, but the word component is not sanitised beyond trimming. Exploitation requires local access, which already implies a compromised trust boundary. Hardening is listed in §18.</td></tr>
+    <tr><td class="id-col">RSK-05</td><td>Third-party model provenance</td><td>Model weights are consumed as published binaries and are not independently audited. This is standard practice and unavoidable at project scale, but it is a genuine supply-chain assumption.</td></tr>
+    <tr><td class="id-col">RSK-06</td><td>No rate limiting</td><td>A local caller could saturate GPU resources. Consistent with the single-user assumption.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<!-- ================= 15. ETHICS ================= -->
+<div class="section">
+<h1><span class="num">15</span>Ethical Considerations</h1>
+
+<p>This section assesses the ethical dimensions of the system as designed and as evaluated. It
+addresses privacy, consent, fairness, transparency, accessibility, misuse, environmental cost,
+licensing obligations, and the integrity of reported results. Where the system falls short, that is
+stated rather than omitted.</p>
+
+<h2>15.1 Privacy and Data Sovereignty</h2>
+<p>Voice is among the most sensitive categories of personal data. It is biometric — a voiceprint can
+identify an individual — and it carries paralinguistic signals including emotional state, and in some
+cases health indicators. A conversational assistant is additionally exposed to whatever the speaker
+says in their own home, including content concerning third parties who never consented to
+processing.</p>
+<p>The system&rsquo;s response is architectural rather than procedural: no audio, transcript, or
+generated text leaves the machine. This is not a policy commitment that could be revised, nor a
+setting that could be misconfigured — there is no code path to any external endpoint. The practical
+consequences are substantial: no third-party processor agreement is required, no cross-border
+transfer arises, there is no vendor-side retention to negotiate, and no account or telemetry
+identifier exists to correlate. Under a data-protection framework such as the GDPR, processing
+remains entirely within the data subject&rsquo;s own control, which materially reduces — though does
+not eliminate — the applicable obligations.</p>
+<div class="callout callout-good">
+  <span class="ct">Design principle</span>
+  <p>Privacy here is a property of the architecture, not a feature layered on top of it. This is the
+  strongest ethical claim the system can make, and it is also the reason the project deliberately
+  declines to offer a hosted deployment (§2.3.2): doing so would forfeit the property that justifies
+  the design.</p>
+</div>
+
+<h2>15.2 Consent, Data Minimisation, and Retention</h2>
+<p>Two mechanisms capture voice. Conversational capture is <em>explicitly initiated</em> — the user
+presses a control to begin and to end recording; there is no wake word, no always-listening mode, and
+no ambient buffer retained beyond the ~300 ms pre-roll needed to avoid clipping speech onset. The
+browser additionally enforces its own permission prompt. Dataset recording is unambiguously
+deliberate: the evaluator is prompted per clip and reviews each recording before accepting it.</p>
+<p>Data minimisation is largely satisfied: conversational audio is processed in memory and not
+persisted; conversation history exists only in browser memory and is discarded on reload. One
+exception is material and is stated plainly: <strong>the confidence audit log persists transcribed
+speech indefinitely, in plain text, with no rotation or purge.</strong> That log exists for a
+legitimate purpose — it is what makes the confidence threshold tunable from evidence and the gating
+behaviour auditable (§8.5.4) — but it constitutes a retention obligation that the system does not
+currently discharge.</p>
+<table class="t">
+  <thead><tr><th style="width:44mm">Recommendation</th><th>Rationale</th></tr></thead>
+  <tbody>
+    <tr><td>Introduce rotation and a retention limit on the confidence log</td><td>Aligns the audit trail with the minimisation applied elsewhere in the system.</td></tr>
+    <tr><td>Offer a redaction mode logging scores and decisions without transcribed text</td><td>Preserves threshold-calibration utility while removing content.</td></tr>
+    <tr><td>Provide an explicit purge command</td><td>Gives the data subject a practical means of erasure without manual file surgery.</td></tr>
+    <tr><td>Obtain informed consent from any additional speaker recorded into the corpus</td><td>The current corpus contains one speaker who is also the developer; this ceases to be self-evident with additional contributors.</td></tr>
+  </tbody>
+</table>
+
+<h2>15.3 Fairness and Bias</h2>
+<p>Two distinct bias surfaces exist, and both are documented rather than claimed absent.</p>
+<h3>15.3.1 Recognition bias</h3>
+<p>Speech recognition accuracy is well established to vary across accent, dialect, first language,
+age, and vocal characteristics correlated with gender. The recognition model is consumed as
+published; the project has not evaluated it across demographic groups and makes no claim about its
+equity. The reported 96% figure characterises one speaker.</p>
+<h3>15.3.2 Threshold calibration bias — a concrete, acknowledged defect</h3>
+<p>More specific to this system: the confidence threshold of &minus;0.6 was calibrated against a
+single speaker&rsquo;s recordings. Because the threshold governs whether a user is understood or
+asked to repeat, a speaker whose confidence scores are systematically lower — plausibly a speaker
+with a different accent, or a quieter or higher-pitched voice — would be asked to repeat more often
+for the same objective clarity of speech. <strong>A fixed threshold calibrated on one voice can
+therefore distribute the burden of the system&rsquo;s uncertainty unequally.</strong></p>
+<table class="t">
+  <thead><tr><th style="width:44mm">Mitigation</th><th>Status</th></tr></thead>
+  <tbody>
+    <tr><td>Threshold is configurable per deployment</td><td>Implemented</td></tr>
+    <tr><td>Audit log provides the evidence needed to re-calibrate</td><td>Implemented</td></tr>
+    <tr><td>Limitation documented rather than concealed</td><td>Implemented (§17)</td></tr>
+    <tr><td>Per-speaker adaptive calibration</td><td>Not implemented — §18</td></tr>
+    <tr><td>Evaluation across multiple speakers and accents</td><td>Not performed — §12.7</td></tr>
+  </tbody>
+</table>
+<h3>15.3.3 Language model bias</h3>
+<p>The language model reproduces biases present in its training data and may generate content that is
+stereotyped, culturally narrow, or factually wrong while remaining fluent. No fine-tuning, content
+filtering, or output moderation is applied beyond the stylistic system prompt. The observed
+arithmetic error during model comparison (§12.6) is a useful reminder that fluency and correctness
+are independent properties — a point that matters more, not less, when responses are delivered
+audibly and cannot be re-read.</p>
+
+<h2>15.4 Transparency and Explainability</h2>
+<p>The system makes its uncertainty visible rather than concealing it. The browser interface displays
+the transcription it acted upon together with its confidence score, and renders rejected
+transcriptions distinctly, showing the user both what was heard and why it was not trusted. The
+active compute device is surfaced. Every gating decision is recorded in an inspectable audit trail.
+This is a deliberate stance: a voice interface that silently substitutes words denies the user any
+means of understanding a failure, whereas one that says &ldquo;I heard this, and I am not confident
+enough to act on it&rdquo; keeps the user in control.</p>
+<p>Limits of transparency are also acknowledged. <code>avg_logprob</code> is an uncalibrated proxy,
+not a probability of correctness; presenting it numerically to a non-technical user risks conveying
+more precision than it possesses. The language model itself is not explainable in any meaningful
+sense — the system can report what it heard, but not why the model answered as it did.</p>
+
+<h2>15.5 Accessibility</h2>
+<table class="t">
+  <thead><tr><th style="width:44mm">Consideration</th><th>Position</th></tr></thead>
+  <tbody>
+    <tr><td>Alternative input path</td><td>Text entry is available throughout, so the system remains usable by those who cannot or prefer not to speak, and in environments where speech is impractical.</td></tr>
+    <tr><td>Dual-modality output</td><td>Every response is presented as text and as speech; neither is required to follow the conversation.</td></tr>
+    <tr><td>Atypical speech patterns</td><td>The confidence gate degrades gracefully rather than acting on misrecognition — but users with dysarthria or atypical speech may experience elevated repeat requests, an instance of the calibration concern in §15.3.2.</td></tr>
+    <tr><td>Screen-reader compatibility</td><td><strong>Not evaluated.</strong> The interface uses semantic elements and reasonable contrast, but no assistive-technology testing was performed. Stated as a gap.</td></tr>
+    <tr><td>Timed interaction</td><td>The browser interface uses explicit start/stop rather than a fixed recording window, avoiding a time pressure that would disadvantage slower speakers.</td></tr>
+  </tbody>
+</table>
+
+<h2>15.6 Misuse Potential</h2>
+<p>The system is a general-purpose local assistant with no capability to act on the world: it has no
+tool use, no file access on the user&rsquo;s behalf, no network reach, and no persistent memory
+across sessions. Its misuse surface is correspondingly narrow, and the offline design removes the
+mass-surveillance concern that attends cloud voice assistants.</p>
+<p>Two residual considerations are noted honestly. First, the same architecture that protects
+privacy also removes centralised safety oversight — an operator may substitute an unaligned model
+with no external control. This is an inherent property of local-first design, and the appropriate
+mitigation is operator responsibility rather than technical restriction. Second, the recorded voice
+corpus is voiceprint-grade biometric material; if such data were shared, it could contribute to voice
+cloning. The corpus is excluded from version control specifically to reduce the chance of
+inadvertent disclosure.</p>
+
+<h2>15.7 Environmental Impact</h2>
+<p>Inference draws power, and this is a genuine if modest cost. Several design decisions reduce it as
+a side effect of the VRAM constraint: quantised models require materially less computation than
+full-precision equivalents; a 3-billion-parameter model is used rather than a larger one; the
+recogniser loads once and is reused; and synthesis runs on CPU rather than occupying the GPU. Local
+inference also avoids the network transport and data-centre overhead of a hosted equivalent, though a
+consumer GPU is less energy-efficient per inference than optimised data-centre hardware, so the net
+comparison is not unambiguous. No lifecycle assessment was performed and none is claimed.</p>
+
+<h2>15.8 Licensing and Attribution</h2>
+<p>Third-party components carry obligations that would bind any redistribution of this system. These
+are recorded because assessing them is part of responsible engineering, not an afterthought.</p>
+<table class="t">
+  <caption>Table 15.1 — Component licensing (verify before any redistribution)</caption>
+  <thead><tr><th style="width:44mm">Component</th><th style="width:38mm">Licence</th><th>Implication</th></tr></thead>
+  <tbody>
+    <tr><td><code>faster-whisper</code>, CTranslate2</td><td>MIT</td><td>Permissive; attribution only.</td></tr>
+    <tr><td>Whisper model weights</td><td>MIT</td><td>Permissive.</td></tr>
+    <tr><td>Ollama</td><td>MIT</td><td>Permissive.</td></tr>
+    <tr><td>Llama 3.2 3B weights</td><td>Llama 3.2 Community Licence</td><td><strong>Not a standard open-source licence.</strong> Carries acceptable-use terms and a large-scale-deployment condition. Requires review before commercial use.</td></tr>
+    <tr><td><code>piper-tts</code> (as installed)</td><td>GPL-3.0-or-later</td><td><strong>Copyleft.</strong> Materially affects redistribution of any combined work. The current architecture invokes Piper as a separate subprocess rather than linking it, which is generally the less entangling arrangement, but competent legal review would be required before distribution.</td></tr>
+    <tr><td>Piper voice model</td><td>To be verified</td><td>Voice model licensing is separate from engine licensing and must be confirmed independently.</td></tr>
+    <tr><td>Flask, NumPy, SoundFile</td><td>BSD-family</td><td>Permissive.</td></tr>
+    <tr><td><code>librosa</code></td><td>ISC</td><td>Permissive.</td></tr>
+    <tr><td>NVIDIA CUDA runtime wheels</td><td>NVIDIA proprietary EULA</td><td>Redistribution restricted; installed by the end user rather than bundled.</td></tr>
+  </tbody>
+</table>
+<div class="callout callout-warn">
+  <span class="ct">Obligation</span>
+  <p>The project is presently used privately, where these obligations are not engaged. Two items
+  would require resolution before any public distribution: the GPL-3.0 copyleft of the synthesis
+  engine, and the non-standard terms of the language model weights. Both are recorded here so that the
+  decision is taken knowingly rather than by omission.</p>
+</div>
+
+<h2>15.9 Integrity of Reported Results</h2>
+<p>A final ethical dimension concerns the reporting of this project&rsquo;s own results. The
+preprocessing layer was the project&rsquo;s stated central contribution. Measurement showed it
+reduced accuracy by 48 percentage points. That finding is reported here, in the README, and in the
+version-control history, with the full ablation and the corrective action — rather than being
+quietly removed, or the benchmark being re-scoped to a condition where the component appeared
+favourable.</p>
+<p>This matters beyond the individual result. A benchmark constructed to confirm a hypothesis
+provides no information; a benchmark capable of refuting it is the only kind worth building. Reporting
+the refutation is what makes the remaining claims in this document credible.</p>
+</div>

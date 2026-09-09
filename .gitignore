@@ -24,3 +24,8 @@ logs/_*.wav
 .serena/
 .playwright-mcp/
 
+
+# generated intermediate artefact of docs/build_pdf.py -- regenerate with
+# `python docs/build_pdf.py`; the source fragments and the final PDF are
+# what's tracked, not this assembled scratch file.
+docs/technical_documentation.html

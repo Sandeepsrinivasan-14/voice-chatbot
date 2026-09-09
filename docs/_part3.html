@@ -1,0 +1,307 @@
+<!-- ================= 5. NON-FUNCTIONAL REQUIREMENTS ================= -->
+<div class="section">
+<h1><span class="num">5</span>Non-Functional Requirements</h1>
+
+<p>Non-functional requirements are identified as <code>NFR-&lt;group&gt;.&lt;n&gt;</code>. Where a
+requirement is quantified, the value measured on the reference configuration is stated here and
+detailed in §13.</p>
+
+<h2>5.1 Performance</h2>
+<table class="t">
+  <thead><tr><th style="width:20mm">ID</th><th>Requirement</th><th style="width:38mm">Target / measured</th></tr></thead>
+  <tbody>
+    <tr><td class="id-col">NFR-P.1</td><td>Speech recognition of a short utterance shall complete within 2 s on the reference GPU configuration.</td><td>Target &lt; 2.0 s;<br><strong>measured 0.85 s</strong></td></tr>
+    <tr><td class="id-col">NFR-P.2</td><td>The recogniser and language model shall be simultaneously resident within the 4 GB VRAM budget, retaining headroom for display and compositor allocations.</td><td>Target &lt; 3.5 GB;<br><strong>measured 2.6 GB peak</strong></td></tr>
+    <tr><td class="id-col">NFR-P.3</td><td>The language model shall begin streaming output before generation completes, so perceived latency is bounded by time-to-first-token rather than total generation time.</td><td>Implemented</td></tr>
+    <tr><td class="id-col">NFR-P.4</td><td>The recognition model shall load once per process and be reused across turns.</td><td>Implemented (lazy, cached)</td></tr>
+    <tr><td class="id-col">NFR-P.5</td><td>First-turn cold-start latency may exceed steady-state latency, but shall be communicated to the user rather than presenting as an unexplained delay.</td><td>Implemented (status text)</td></tr>
+  </tbody>
+</table>
+
+<h2>5.2 Reliability and Robustness</h2>
+<table class="t">
+  <thead><tr><th style="width:20mm">ID</th><th>Requirement</th><th style="width:38mm">Realisation</th></tr></thead>
+  <tbody>
+    <tr><td class="id-col">NFR-R.1</td><td>No single non-critical subsystem failure shall terminate a conversational session.</td><td>Fail-closed handlers per stage (§8.9)</td></tr>
+    <tr><td class="id-col">NFR-R.2</td><td>Failure of audio preprocessing shall degrade to unprocessed audio, not to an aborted turn.</td><td>Two-level guard: per-step and per-turn</td></tr>
+    <tr><td class="id-col">NFR-R.3</td><td>Absence or malfunction of GPU acceleration shall degrade to CPU execution automatically, without operator intervention.</td><td>Trial-inference probe at load (§8.4)</td></tr>
+    <tr><td class="id-col">NFR-R.4</td><td>Transient failures of the language model server shall be retried before being surfaced as errors, but only where no partial output has been emitted.</td><td>Bounded retry with backoff (§8.6.3)</td></tr>
+    <tr><td class="id-col">NFR-R.5</td><td>Log files shall not grow without bound.</td><td>Rotating handler, 5 MB &times; 3 generations</td></tr>
+    <tr><td class="id-col">NFR-R.6</td><td>Evaluation dataset recording shall be resumable after interruption.</td><td>Manifest-driven resume (§8.8.3)</td></tr>
+  </tbody>
+</table>
+
+<h2>5.3 Security and Privacy</h2>
+<table class="t">
+  <thead><tr><th style="width:20mm">ID</th><th>Requirement</th><th style="width:38mm">Realisation</th></tr></thead>
+  <tbody>
+    <tr><td class="id-col">NFR-S.1</td><td>No component shall transmit audio, transcripts, or generated text to any host other than the local loopback interface.</td><td>Architectural; verified by network isolation test (§11.5)</td></tr>
+    <tr><td class="id-col">NFR-S.2</td><td>Web services shall bind exclusively to <code>127.0.0.1</code> and shall not listen on externally routable interfaces.</td><td>Explicit bind address</td></tr>
+    <tr><td class="id-col">NFR-S.3</td><td>Uploaded audio shall be size-bounded to prevent unbounded resource consumption.</td><td>25 MB cap; HTTP 413 on breach</td></tr>
+    <tr><td class="id-col">NFR-S.4</td><td>Error responses shall not disclose stack traces or internal filesystem paths to the client.</td><td>Structured JSON error handlers (§8.8.1)</td></tr>
+    <tr><td class="id-col">NFR-S.5</td><td>Recorded voice data shall remain on the local filesystem and shall be excluded from version control.</td><td><code>.gitignore</code> excludes <code>*.wav</code></td></tr>
+  </tbody>
+</table>
+
+<h2>5.4 Usability</h2>
+<table class="t">
+  <thead><tr><th style="width:20mm">ID</th><th>Requirement</th><th style="width:38mm">Realisation</th></tr></thead>
+  <tbody>
+    <tr><td class="id-col">NFR-U.1</td><td>Dependency failures shall be reported as actionable prose naming the remedy, not as stack traces.</td><td>Preflight checks in both interfaces</td></tr>
+    <tr><td class="id-col">NFR-U.2</td><td>The user shall be informed of the current activity — listening, transcribing, generating, speaking — at all times.</td><td>Live status line</td></tr>
+    <tr><td class="id-col">NFR-U.3</td><td>Rejected transcriptions shall be presented with the reason for rejection, not silently discarded.</td><td>Distinct visual treatment plus score</td></tr>
+    <tr><td class="id-col">NFR-U.4</td><td>Generated responses shall be phrased for auditory delivery, avoiding constructs that depend on visual layout.</td><td>System prompt constraint (§8.6.1)</td></tr>
+    <tr><td class="id-col">NFR-U.5</td><td>A non-vocal input path shall exist for environments where speech is impractical.</td><td>Text entry in browser interface</td></tr>
+  </tbody>
+</table>
+
+<h2>5.5 Maintainability and Portability</h2>
+<table class="t">
+  <thead><tr><th style="width:20mm">ID</th><th>Requirement</th><th style="width:38mm">Realisation</th></tr></thead>
+  <tbody>
+    <tr><td class="id-col">NFR-M.1</td><td>All tunable parameters shall be defined once, in a single module, and shall not be duplicated across call sites.</td><td><code>src/config.py</code>, frozen dataclass</td></tr>
+    <tr><td class="id-col">NFR-M.2</td><td>The automated test suite shall execute without GPU, language model server, microphone, or synthesis binary.</td><td>42 tests, all external calls mocked</td></tr>
+    <tr><td class="id-col">NFR-M.3</td><td>Tests and static analysis shall execute automatically on every change pushed to the repository.</td><td>GitHub Actions workflow</td></tr>
+    <tr><td class="id-col">NFR-M.4</td><td>The codebase shall pass static lint analysis with no outstanding findings.</td><td><code>ruff</code>; clean at baseline</td></tr>
+    <tr><td class="id-col">NFR-M.5</td><td>Behaviour established by empirical evidence shall be protected by regression tests that fail if it is reverted without new evidence.</td><td>Preprocessing lock-in tests (§11.3)</td></tr>
+    <tr><td class="id-col">NFR-M.6</td><td>Dependencies shall be layered so environments not requiring GPU acceleration need not install GPU runtime libraries.</td><td>Three-file requirements split</td></tr>
+    <tr><td class="id-col">NFR-M.7</td><td>Platform-specific workarounds shall be isolated in dedicated modules and documented at the point of use.</td><td><code>src/cuda_dlls.py</code></td></tr>
+  </tbody>
+</table>
+
+<h2>5.6 Observability</h2>
+<table class="t">
+  <thead><tr><th style="width:20mm">ID</th><th>Requirement</th><th style="width:38mm">Realisation</th></tr></thead>
+  <tbody>
+    <tr><td class="id-col">NFR-O.1</td><td>Per-stage timing shall be recorded for every conversational turn.</td><td><code>StageTimings</code> &rarr; <code>pipeline.log</code></td></tr>
+    <tr><td class="id-col">NFR-O.2</td><td>Every confidence decision shall be independently auditable after the fact, including decisions to accept.</td><td><code>confidence_log.csv</code></td></tr>
+    <tr><td class="id-col">NFR-O.3</td><td>The active compute device for recognition shall be discoverable at runtime by the operator.</td><td>Health endpoint and interface badge</td></tr>
+  </tbody>
+</table>
+</div>
+
+<!-- ================= 6. USE CASES ================= -->
+<div class="section">
+<h1><span class="num">6</span>Use Cases</h1>
+
+<h2>6.1 Actor Inventory</h2>
+<table class="t">
+  <thead><tr><th style="width:40mm">Actor</th><th style="width:26mm">Type</th><th>Role</th></tr></thead>
+  <tbody>
+    <tr><td>Speaker / User</td><td>Primary, human</td><td>Initiates conversational turns by voice or text; consumes spoken responses.</td></tr>
+    <tr><td>Evaluator</td><td>Secondary, human</td><td>Records the evaluation dataset and executes benchmarks.</td></tr>
+    <tr><td>Ollama service</td><td>Supporting, system</td><td>Serves the language model over the loopback interface.</td></tr>
+    <tr><td>Piper binary</td><td>Supporting, system</td><td>Performs speech synthesis as a subprocess.</td></tr>
+  </tbody>
+</table>
+
+<h2>6.2 UC-01 — Conduct a spoken conversational turn</h2>
+<table class="t">
+  <tbody>
+    <tr><th style="width:34mm">Identifier</th><td>UC-01</td></tr>
+    <tr><th>Primary actor</th><td>Speaker</td></tr>
+    <tr><th>Goal</th><td>Obtain a spoken answer to a spoken question, with no data leaving the machine.</td></tr>
+    <tr><th>Preconditions</th><td>Service running; microphone permission granted; Ollama reachable; voice model present.</td></tr>
+    <tr><th>Trigger</th><td>User activates the microphone control and speaks.</td></tr>
+    <tr><th>Main flow</th><td>
+      1. User starts recording; the interface indicates the listening state.<br>
+      2. User speaks, then stops recording.<br>
+      3. System decodes the browser audio to 16 kHz mono PCM.<br>
+      4. System normalises amplitude (§8.3).<br>
+      5. System transcribes the audio and computes a confidence score.<br>
+      6. The confidence gate accepts the transcription (§8.5).<br>
+      7. The transcription is displayed as the user message, annotated with its confidence.<br>
+      8. System submits the transcription, prior turns, and system prompt to the language model.<br>
+      9. Response tokens stream into the interface as they are produced.<br>
+      10. On completion, the response is synthesised and played automatically.<br>
+      11. The turn is appended to session history; the timing record is written.
+    </td></tr>
+    <tr><th>Postconditions</th><td>Conversation history extended by one exchange; one row appended to the confidence audit log; per-stage timings recorded.</td></tr>
+    <tr><th>Alternate flows</th><td>
+      <strong>A1 — Low confidence.</strong> At step 6 the gate rejects; control transfers to UC-02.<br>
+      <strong>A2 — No speech detected.</strong> Capture yields insufficient voiced audio; the turn is abandoned and the system returns to listening.<br>
+      <strong>A3 — Model server unreachable.</strong> At step 8, after bounded retries, a diagnostic replaces the response.<br>
+      <strong>A4 — Synthesis failure.</strong> At step 10 the textual response remains displayed; playback is skipped and an advisory is shown.
+    </td></tr>
+  </tbody>
+</table>
+
+<h2>6.3 UC-02 — Recover from a low-confidence transcription</h2>
+<table class="t">
+  <tbody>
+    <tr><th style="width:34mm">Identifier</th><td>UC-02</td></tr>
+    <tr><th>Primary actor</th><td>Speaker</td></tr>
+    <tr><th>Goal</th><td>Prevent an unreliable transcription from being acted upon, and give the speaker an explicit opportunity to repeat.</td></tr>
+    <tr><th>Preconditions</th><td>An utterance has been transcribed with confidence below the configured threshold.</td></tr>
+    <tr><th>Main flow</th><td>
+      1. The gate evaluates the first-pass transcription as below threshold and returns <code>RETRY_MORE_BEAMS</code>.<br>
+      2. System re-transcribes the same audio at beam size 5 rather than 1.<br>
+      3. The gate re-evaluates the second attempt.<br>
+      4. If now at or above threshold, the transcription is accepted and UC-01 resumes at step 7.<br>
+      5. Otherwise the gate returns <code>ASK_TO_REPEAT</code>; the transcription is <em>not</em> forwarded to the language model.<br>
+      6. The interface displays the rejected text in a visually distinct form together with its score.<br>
+      7. The system synthesises and plays a request for repetition.<br>
+      8. Control returns to the speaker.
+    </td></tr>
+    <tr><th>Postconditions</th><td>No language model invocation occurred. Two rows are appended to the audit log — one per attempt — recording both scores, both beam sizes, and both decisions.</td></tr>
+    <tr><th>Notes</th><td>This is the principal safety property of the system. Correct operation was observed during system testing, including a case in which a non-speech input produced a spurious transcription at confidence &minus;0.88 and was correctly refused (§11.5).</td></tr>
+  </tbody>
+</table>
+
+<h2>6.4 Supporting Use Cases</h2>
+<table class="t">
+  <thead><tr><th style="width:20mm">ID</th><th style="width:44mm">Use case</th><th>Summary</th></tr></thead>
+  <tbody>
+    <tr><td class="id-col">UC-03</td><td>Converse by typed input</td><td>The user types rather than speaking. Recognition and confidence gating are bypassed; generation and synthesis proceed unchanged. Provides an accessible path where speech is impractical or no microphone is available.</td></tr>
+    <tr><td class="id-col">UC-04</td><td>Record evaluation dataset</td><td>The evaluator is prompted for each word and modulation pair in turn, records each clip, reviews it, and either accepts or re-takes it. Accepted clips are written as 16 kHz mono WAV with a manifest entry. Interrupted sessions resume at the first incomplete pair.</td></tr>
+    <tr><td class="id-col">UC-05</td><td>Execute accuracy benchmark</td><td>Every manifest clip is transcribed twice — unprocessed and preprocessed — under identical decoding parameters. Accuracy is computed overall and per modulation, written to CSV, and rendered as a comparison chart.</td></tr>
+    <tr><td class="id-col">UC-06</td><td>Verify installation</td><td>Each external dependency (CUDA visibility, recogniser, model server, synthesiser) is exercised independently and reported pass or fail, so one broken component does not mask the status of the others.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<!-- ================= 7. ARCHITECTURE ================= -->
+<div class="section">
+<h1><span class="num">7</span>System Architecture</h1>
+
+<h2>7.1 Architectural Overview</h2>
+<p>The system is a layered monolith comprising a shared domain core and two interchangeable
+presentation layers. The core (<code>pipeline.py</code> and its collaborators) owns all domain
+behaviour; the terminal and browser front ends are thin adapters over it. This is deliberate: it
+guarantees that both interfaces exhibit identical recognition, gating, and generation semantics,
+because they invoke the same functions rather than parallel implementations of the same idea.</p>
+
+<table class="t">
+  <caption>Table 7.1 — Layer responsibilities</caption>
+  <thead><tr><th style="width:34mm">Layer</th><th style="width:52mm">Modules</th><th>Responsibility</th></tr></thead>
+  <tbody>
+    <tr><td>Presentation</td><td><code>cli.py</code>; <code>chat_web.py</code> + <code>web_chat/</code>; <code>record_web.py</code> + <code>web_recorder/</code></td><td>User interaction, request validation, presentation of state. Contains no domain logic.</td></tr>
+    <tr><td>Domain / orchestration</td><td><code>pipeline.py</code></td><td>Capture, transcription with confidence policy, generation, synthesis, turn sequencing, timing.</td></tr>
+    <tr><td>Domain services</td><td><code>preprocessing.py</code>; <code>confidence_check.py</code></td><td>Signal conditioning; confidence evaluation, decision, and audit.</td></tr>
+    <tr><td>Platform / support</td><td><code>config.py</code>; <code>cuda_dlls.py</code>; <code>browser_audio.py</code>; <code>web_common.py</code></td><td>Configuration, platform workarounds, media decoding, shared web concerns.</td></tr>
+    <tr><td>Evaluation</td><td><code>benchmark.py</code>; <code>record_test_samples.py</code>; <code>verify_setup.py</code></td><td>Dataset construction, measurement, installation validation.</td></tr>
+  </tbody>
+</table>
+
+<h2>7.2 Component Inventory</h2>
+<table class="t">
+  <caption>Table 7.2 — Module inventory and principal dependencies</caption>
+  <thead><tr><th style="width:42mm">Module</th><th>Responsibility</th><th style="width:38mm">Depends on</th></tr></thead>
+  <tbody>
+    <tr><td><code>src/config.py</code></td><td>Single source of truth for every tunable parameter; environment and <code>.env</code> resolution; type validation.</td><td><code>python-dotenv</code></td></tr>
+    <tr><td><code>src/cuda_dlls.py</code></td><td>Places CUDA runtime library directories on the process search path before the inference backend is imported (§8.4.2).</td><td>—</td></tr>
+    <tr><td><code>src/preprocessing.py</code></td><td>RMS normalisation; pitch and rate detection; correction stages (disabled by default).</td><td><code>librosa</code>, <code>numpy</code></td></tr>
+    <tr><td><code>src/confidence_check.py</code></td><td>Confidence aggregation, three-way decision, CSV audit trail.</td><td><code>config</code></td></tr>
+    <tr><td><code>src/pipeline.py</code></td><td>Orchestration core: capture, recognition with retry policy, generation, synthesis, playback, timing.</td><td><code>faster-whisper</code>, <code>sounddevice</code>, <code>webrtcvad</code>, <code>requests</code>, domain services</td></tr>
+    <tr><td><code>src/browser_audio.py</code></td><td>Decodes browser-supplied WebM/Opus or Ogg/Opus into 16 kHz mono float PCM.</td><td><code>av</code> (PyAV)</td></tr>
+    <tr><td><code>src/web_common.py</code></td><td>Shared JSON error handlers; development and production serving switch.</td><td><code>flask</code>, <code>waitress</code>, <code>config</code></td></tr>
+    <tr><td><code>src/chat_web.py</code></td><td>HTTP surface for the conversational interface: transcription, streamed generation, synthesis.</td><td><code>pipeline</code>, <code>web_common</code>, <code>browser_audio</code></td></tr>
+    <tr><td><code>src/record_web.py</code></td><td>HTTP surface for dataset construction: plan, upload, manifest maintenance.</td><td><code>web_common</code>, <code>browser_audio</code>, <code>soundfile</code></td></tr>
+    <tr><td><code>src/cli.py</code></td><td>Terminal presentation with preflight dependency checks.</td><td><code>pipeline</code>, <code>rich</code></td></tr>
+    <tr><td><code>src/benchmark.py</code></td><td>Controlled two-condition accuracy measurement and chart rendering.</td><td><code>faster-whisper</code>, <code>preprocessing</code>, <code>matplotlib</code></td></tr>
+    <tr><td><code>verify_setup.py</code></td><td>Independent validation of each external dependency.</td><td>All external components</td></tr>
+  </tbody>
+</table>
+
+<h2>7.3 Runtime View — a single conversational turn</h2>
+<table class="t">
+  <caption>Table 7.3 — Sequence of a voice turn through the browser interface</caption>
+  <thead><tr><th style="width:11mm" class="ctr">#</th><th style="width:36mm">Participant</th><th>Action</th></tr></thead>
+  <tbody>
+    <tr><td class="ctr">1</td><td>Browser</td><td>Captures microphone audio via <code>MediaRecorder</code>; encodes WebM/Opus.</td></tr>
+    <tr><td class="ctr">2</td><td>Browser &rarr; Server</td><td><code>POST /api/transcribe</code> (multipart, audio blob).</td></tr>
+    <tr><td class="ctr">3</td><td><code>browser_audio</code></td><td>Decodes and resamples to 16 kHz mono float32.</td></tr>
+    <tr><td class="ctr">4</td><td><code>preprocessing</code></td><td>Applies RMS normalisation; records detection metadata.</td></tr>
+    <tr><td class="ctr">5</td><td><code>pipeline</code></td><td>Transcribes at beam 1; obtains segment log-probabilities.</td></tr>
+    <tr><td class="ctr">6</td><td><code>confidence_check</code></td><td>Aggregates the score, decides, writes the audit row.</td></tr>
+    <tr><td class="ctr">7</td><td><code>pipeline</code></td><td>If rejected on first pass, re-transcribes at beam 5 and re-evaluates.</td></tr>
+    <tr><td class="ctr">8</td><td>Server &rarr; Browser</td><td>Returns text, decision, score, threshold, and active device.</td></tr>
+    <tr><td class="ctr">9</td><td>Browser &rarr; Server</td><td>If accepted: <code>POST /api/respond</code> with the message and prior turns.</td></tr>
+    <tr><td class="ctr">10</td><td>Server &rarr; Ollama</td><td>Proxies a streaming chat completion over loopback.</td></tr>
+    <tr><td class="ctr">11</td><td>Server &rarr; Browser</td><td>Relays tokens as a chunked text stream; the interface renders progressively.</td></tr>
+    <tr><td class="ctr">12</td><td>Browser &rarr; Server</td><td><code>POST /api/tts</code> with the completed response text.</td></tr>
+    <tr><td class="ctr">13</td><td><code>pipeline</code> &rarr; Piper</td><td>Invokes the synthesis binary as a subprocess; returns WAV bytes.</td></tr>
+    <tr><td class="ctr">14</td><td>Browser</td><td>Plays the audio and retains the blob for on-demand replay.</td></tr>
+  </tbody>
+</table>
+
+<h2>7.4 Technology Selection and Rationale</h2>
+<p>Every selection below was constrained first by CON-01 (no external network calls), which excluded
+all hosted services outright, and second by CON-02 (4 GB of shared VRAM).</p>
+
+<table class="t">
+  <caption>Table 7.4 — Component selection, alternatives considered, and rationale</caption>
+  <thead><tr><th style="width:22mm">Function</th><th style="width:32mm">Selected</th><th style="width:36mm">Alternatives considered</th><th>Rationale</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>Speech recognition</td>
+      <td><code>faster-whisper</code> on CTranslate2; model <code>small</code></td>
+      <td>OpenAI <code>whisper</code> reference implementation; <code>whisper.cpp</code>; Vosk; hosted STT APIs</td>
+      <td>Hosted services excluded by CON-01. The reference implementation requires the full PyTorch stack — several gigabytes of dependency and materially higher VRAM. CTranslate2 runs the same weights with lower memory and faster inference, and supports <code>int8_float16</code> quantisation, which was decisive under CON-02. Vosk offers lower accuracy on this task.</td>
+    </tr>
+    <tr>
+      <td>Model runtime</td>
+      <td>Ollama 0.33.3</td>
+      <td>llama.cpp directly; LM Studio; vLLM; Hugging Face <code>transformers</code></td>
+      <td>Ollama manages model acquisition, quantisation format, GPU layer offload, and memory residency automatically, exposing a stable local HTTP interface. vLLM targets server-class GPUs. Direct llama.cpp integration would have required manual CUDA build management for no functional gain.</td>
+    </tr>
+    <tr>
+      <td>Language model</td>
+      <td><code>llama3.2:3b</code> (Q4_K_M, 2.0 GB)</td>
+      <td><code>qwen2.5:3b-instruct</code>; 7–8 B parameter models</td>
+      <td>Selected after direct comparison (§12.6). Larger models exceed the VRAM budget when co-resident with the recogniser. Between the 3 B candidates, <code>llama3.2:3b</code> was more reliably correct on elementary arithmetic and produced phrasing better suited to spoken delivery.</td>
+    </tr>
+    <tr>
+      <td>Speech synthesis</td>
+      <td>Piper; voice <code>en_US-lessac-medium</code></td>
+      <td>Coqui TTS; espeak-ng; Windows SAPI</td>
+      <td>Fast enough on CPU alone, leaving the GPU entirely to recognition and generation, while remaining natural enough for conversational use. espeak-ng is markedly more synthetic; Coqui carries a heavier dependency footprint. Licensing implications are recorded in §15.8.</td>
+    </tr>
+    <tr>
+      <td>Endpoint detection</td>
+      <td>WebRTC VAD</td>
+      <td>Fixed-duration recording; energy thresholding; Silero VAD</td>
+      <td>Fixed durations either truncate long utterances or add latency to short ones. Energy thresholding fails on whispered input — a primary target condition. WebRTC VAD is well established, computationally trivial, and operates frame-by-frame at the required sample rate.</td>
+    </tr>
+    <tr>
+      <td>Signal processing</td>
+      <td><code>librosa</code></td>
+      <td>Hand-written DSP; <code>torchaudio</code>; <code>scipy</code> alone</td>
+      <td>Provides tested implementations of pitch tracking, onset detection, and time-scale modification. <code>torchaudio</code> would reintroduce the PyTorch dependency deliberately avoided in recognition.</td>
+    </tr>
+    <tr>
+      <td>Media decoding</td>
+      <td>PyAV</td>
+      <td>Client-side WAV encoding; external <code>ffmpeg</code> binary</td>
+      <td>Already present as a transitive dependency of the recogniser, so adds no install cost. Bundles its own FFmpeg libraries, avoiding a system-level dependency. Client-side encoding would have required hand-written resampling in JavaScript.</td>
+    </tr>
+    <tr>
+      <td>Web framework</td>
+      <td>Flask; Waitress in production mode</td>
+      <td>FastAPI; Django; <code>http.server</code></td>
+      <td>The HTTP surface is five endpoints; Django is disproportionate. FastAPI&rsquo;s asynchronous model offers no benefit where the workload is bounded by synchronous GPU inference. Waitress was selected over Gunicorn because Gunicorn does not support Windows (CON-03).</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>7.5 Deployment Topology</h2>
+<p>All processes execute on a single host, communicating exclusively over the loopback interface and
+the local filesystem.</p>
+<table class="t">
+  <thead><tr><th style="width:46mm">Process</th><th style="width:32mm">Interface</th><th>Notes</th></tr></thead>
+  <tbody>
+    <tr><td>Application server (<code>chat_web.py</code>)</td><td><code>127.0.0.1:5006</code></td><td>Hosts the interface and the pipeline; loads the recogniser into GPU memory on first use.</td></tr>
+    <tr><td>Ollama service</td><td><code>127.0.0.1:11434</code></td><td>Installed and managed independently; retains the model in memory between requests.</td></tr>
+    <tr><td>Piper</td><td>Subprocess, stdin/stdout</td><td>Invoked per synthesis request; no persistent process.</td></tr>
+    <tr><td>Dataset recorder (<code>record_web.py</code>)</td><td><code>127.0.0.1:5005</code></td><td>Run only during dataset construction; not required at conversational runtime.</td></tr>
+  </tbody>
+</table>
+<div class="callout">
+  <span class="ct">Deployment note</span>
+  <p>The browser is the only component requiring a graphical session, and it connects to
+  <code>localhost</code>. Because <code>getUserMedia</code> treats <code>localhost</code> as a secure
+  context, microphone access functions without TLS. Any deployment reachable by hostname or public
+  address would require HTTPS, and would additionally require the access controls that are explicitly
+  out of scope (§2.3.2, §14.4).</p>
+</div>
+</div>
