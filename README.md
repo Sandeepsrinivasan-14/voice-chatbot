@@ -11,6 +11,8 @@ passed downstream as a confident mistranscription.
 ![Python 3.11](https://img.shields.io/badge/python-3.11-blue)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
+![Browser chat interface](docs/img/chat-ui.png)
+
 ## Background
 
 Whisper and comparable STT models are trained mostly on clean, conversational
@@ -130,6 +132,10 @@ pip install -r requirements.txt         # CPU
 # pip install -r requirements-gpu.txt   # GPU: CUDA 12.x, ~1.3 GB of wheels
 ```
 
+`requirements.txt` uses lower-bound pins. To reproduce a known-good
+environment exactly, use [`requirements-frozen.txt`](requirements-frozen.txt)
+instead (fully resolved versions from a working CPU install).
+
 Pull the model:
 
 ```bash
@@ -141,6 +147,40 @@ Check the install. Reports on CUDA, faster-whisper, Ollama, and Piper:
 ```bash
 python verify_setup.py
 ```
+
+<details>
+<summary>Sample output (GPU machine, all components present)</summary>
+
+```
+============================================================
+Local Voice Chatbot -- setup verification
+============================================================
+
+[1/4] Checking CUDA availability for faster-whisper (CTranslate2)...
+  PASS -- 1 CUDA device(s) visible to CTranslate2.
+
+[2/4] Loading faster-whisper and transcribing a synthetic test clip...
+  PASS -- model loaded and ran inference on cuda.
+
+[3/4] Checking Ollama server + a test generation...
+  Ollama is running. Installed models: ['qwen2.5:3b-instruct', 'llama3.2:3b']
+  PASS -- model responded: 'OK.'
+
+[4/4] Checking Piper TTS synthesis...
+  PASS -- wrote logs\_verify_piper_test.wav (125484 bytes).
+
+============================================================
+Summary
+============================================================
+  CUDA             PASS
+  faster-whisper   PASS
+  Ollama           PASS
+  Piper            PASS
+
+All critical components OK. Ready for src/cli.py.
+```
+
+</details>
 
 Every tunable has a default in [`src/config.py`](src/config.py). To override one,
 copy `.env.example` to `.env` and edit it. Nothing in `.env` is required to run.
