@@ -29,3 +29,6 @@ logs/_*.wav
 # `python docs/build_pdf.py`; the source fragments and the final PDF are
 # what's tracked, not this assembled scratch file.
 docs/technical_documentation.html
+
+# private cross-session working notes -- never pushed to GitHub
+context.md
