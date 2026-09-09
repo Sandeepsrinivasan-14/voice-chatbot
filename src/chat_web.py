@@ -115,6 +115,7 @@ def transcribe_endpoint():
         "avg_logprob": conf_result.avg_logprob,
         "threshold": conf_result.threshold,
         "accepted": conf_result.decision == Decision.ACCEPTED,
+        "whisper_device": _whisper_device,
     })
 
 

@@ -270,11 +270,23 @@ function addReplayButton(bubble, audioBlob) {
   bubble.appendChild(btn);
 }
 
+function applyWhisperDevice(device) {
+  if (device) setStatus('ok', 'Ready · STT on ' + device.toUpperCase());
+}
+
 async function checkHealth() {
   try {
     const res = await fetch('/api/health');
     const data = await res.json();
-    setStatus('ok', 'Ready · STT on ' + (data.whisper_device || '?').toUpperCase());
+    // Whisper loads lazily on the first transcription request, so
+    // whisper_device is still null right after the server starts --
+    // showing "STT on ?" here would look broken rather than pending.
+    // The badge fills in for real once /api/transcribe reports a device.
+    if (data.whisper_device) {
+      applyWhisperDevice(data.whisper_device);
+    } else {
+      setStatus('ok', 'Ready');
+    }
   } catch (err) {
     setStatus('err', 'Server unreachable');
   }
@@ -431,6 +443,7 @@ async function onRecordingStopped() {
     const res = await fetch('/api/transcribe', { method: 'POST', body: form });
     const data = await res.json();
     if (!res.ok || data.error) throw new Error(data.error || ('HTTP ' + res.status));
+    applyWhisperDevice(data.whisper_device); // fills in "STT on ?" once known
 
     if (!data.accepted) {
       addRow('rejected', '"' + data.text + '"', { meta: `low confidence (${data.avg_logprob.toFixed(2)}) -- not sent to the model` });
