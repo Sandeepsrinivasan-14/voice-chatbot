@@ -7,6 +7,7 @@ is what lets this run in CI on a plain runner.
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import sys
 
@@ -42,3 +43,23 @@ def client(monkeypatch):
     chat_web.app.config["TESTING"] = True
     with chat_web.app.test_client() as test_client:
         yield test_client
+
+
+@pytest.fixture
+def learning_config(tmp_path, monkeypatch):
+    """Swaps chat_web.CONFIG for one with the continuous-learning layer
+    turned on and pointed at a throwaway SQLite file -- for tests that
+    exercise src/learning/ through chat_web.py's endpoints (the `client`
+    fixture above, with the real module-level CONFIG, always has
+    learning_enabled=False). Only affects the test that asks for it.
+    """
+    import chat_web
+    import config as config_module
+
+    test_config = dataclasses.replace(
+        config_module.Config(),
+        learning_enabled=True,
+        learning_db_path=str(tmp_path / "learning.db"),
+    )
+    monkeypatch.setattr(chat_web, "CONFIG", test_config)
+    return test_config

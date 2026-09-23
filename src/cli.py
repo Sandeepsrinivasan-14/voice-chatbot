@@ -134,7 +134,9 @@ def run_cli():
             processed_audio, report = pipeline.normalize_audio(audio, pipeline.SAMPLE_RATE)
 
             t0 = time.time()
-            text, conf_result = pipeline.transcribe_with_confidence(whisper_model, processed_audio)
+            text, conf_result, _detected_language = pipeline.transcribe_with_confidence(
+                whisper_model, processed_audio
+            )
             stt_s = time.time() - t0
 
             if conf_result.decision == Decision.ASK_TO_REPEAT:

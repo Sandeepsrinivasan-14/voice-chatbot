@@ -96,7 +96,15 @@ def check_ollama() -> bool:
             return False
         print(f"  Ollama is running. Installed models: {models}")
 
-        model_name = models[0]
+        # Test the model this app is actually configured to use (not
+        # just "some" installed model) -- otherwise this can report PASS
+        # while the real configured model is missing or broken, or FAIL
+        # over an unrelated leftover model while the real one is fine.
+        model_name = CONFIG.ollama_model
+        if model_name not in models:
+            print(f"  WARN -- configured model '{model_name}' is not pulled. Run:\n"
+                  f"         ollama pull {model_name}")
+            return False
         # First generation after Ollama starts pays a one-time cost to
         # load model weights into (V)RAM -- give it real headroom rather
         # than timing out and reporting a false FAIL.

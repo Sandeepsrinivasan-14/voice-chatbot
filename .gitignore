@@ -14,6 +14,7 @@ logs/*.log
 # large model binaries -- downloaded locally, not committed
 models/piper/*.onnx
 models/piper/*.onnx.json
+models/ai4bharat_tts/
 logs/*.csv
 logs/_*.wav
 # NOTE: data/results/accuracy_comparison.png and benchmark_results.csv are
@@ -32,3 +33,18 @@ docs/technical_documentation.html
 
 # private cross-session working notes -- never pushed to GitHub
 context.md
+
+# continuous-learning feedback DB (src/learning/) -- local correction
+# history, not sample/demo data; off by default (LEARNING_ENABLED=0)
+data/learning/*.db
+data/learning/*.db-wal
+data/learning/*.db-shm
+# audio segments for corrected transcripts -- off by default
+# (LEARNING_PERSIST_AUDIO_ENABLED=0); personal voice data when it exists
+data/learning/audio/*.wav
+# versioned training datasets built from feedback (src/learning/dataset_builder.py)
+data/learning/datasets/*
+!data/learning/datasets/.gitkeep
+# trained model artifacts and the registry pointing at them
+data/learning/models/*
+!data/learning/models/.gitkeep

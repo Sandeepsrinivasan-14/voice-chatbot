@@ -72,7 +72,39 @@ class TestFromEnv:
             "CONFIDENCE_LOG_PATH", "OLLAMA_URL", "OLLAMA_MODEL",
             "PIPER_EXECUTABLE", "PIPER_MODEL_PATH", "LOG_DIR",
             "CHAT_WEB_PORT", "RECORD_WEB_PORT", "PRODUCTION",
+            "LEARNING_ENABLED", "LEARNING_FEEDBACK_ENABLED",
+            "LEARNING_PERSONALIZED_CORRECTION_ENABLED",
+            "LEARNING_CONTEXT_AWARE_ENABLED", "LEARNING_AUTO_APPLY_ENABLED",
+            "LEARNING_DB_PATH", "LEARNING_SUGGEST_THRESHOLD",
+            "LEARNING_AUTO_APPLY_THRESHOLD", "LEARNING_RULE_FREQUENCY_SATURATION",
+            "LEARNING_RULE_RECENCY_HALFLIFE_DAYS",
         )
         for name in env_vars:
             monkeypatch.delenv(name, raising=False)
         assert cfg.Config.from_env() == cfg.Config()
+
+
+class TestLearningDefaults:
+    """The continuous-learning layer must ship safe-by-default: the master
+    switch and the one flag that rewrites what gets sent to the LLM are
+    both off until explicitly enabled.
+    """
+
+    def test_learning_is_disabled_by_default(self):
+        c = cfg.Config()
+        assert c.learning_enabled is False
+
+    def test_auto_apply_is_disabled_by_default_even_if_learning_is_on(self):
+        c = cfg.Config()
+        assert c.learning_auto_apply_enabled is False
+
+    def test_learning_enabled_reads_from_env(self, monkeypatch):
+        monkeypatch.setenv("LEARNING_ENABLED", "1")
+        assert cfg.Config.from_env().learning_enabled is True
+
+    def test_learning_thresholds_read_from_env(self, monkeypatch):
+        monkeypatch.setenv("LEARNING_AUTO_APPLY_THRESHOLD", "0.8")
+        monkeypatch.setenv("LEARNING_SUGGEST_THRESHOLD", "0.4")
+        c = cfg.Config.from_env()
+        assert c.learning_auto_apply_threshold == 0.8
+        assert c.learning_suggest_threshold == 0.4

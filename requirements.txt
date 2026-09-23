@@ -28,7 +28,8 @@ webrtcvad-wheels>=2.0.11.post1   # prebuilt Windows wheels of Google's WebRTC VA
 requests>=2.31.0            # talks to Ollama's local REST API (localhost:11434)
 
 # --- TTS ---
-piper-tts>=1.2.0            # local, offline neural TTS
+piper-tts>=1.8.0            # local, offline neural TTS -- 1.8.0+ for the in-process
+                            # PiperVoice.synthesize()/synthesize_wav() API pipeline.py uses
 
 # --- CLI / reporting ---
 rich>=13.7.0                # Phase 7 CLI (status panels, live transcription)

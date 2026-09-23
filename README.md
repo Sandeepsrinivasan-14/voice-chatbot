@@ -41,7 +41,7 @@ flowchart TD
     pre --> stt[faster-whisper<br/>CTranslate2, GPU or CPU]
     stt --> gate{Confidence gate<br/>avg log-prob vs threshold}
     gate -->|below threshold| retry[Re-decode with a wider beam,<br/>then ask the speaker to repeat]
-    gate -->|accepted| llm[Ollama, llama3.2:3b<br/>streaming, multi-turn]
+    gate -->|accepted| llm[Ollama, gemma3n:e2b<br/>streaming, multi-turn]
     llm --> tts[Piper<br/>ONNX neural TTS]
     retry --> tts
     tts --> spk[Speaker]
@@ -55,7 +55,7 @@ HTTP call to Ollama on `localhost:11434`.
 | Stage | Choice | Why |
 | :--- | :--- | :--- |
 | STT | faster-whisper | CTranslate2 build of Whisper. Runs on CPU with no extra packages, and uses roughly a quarter of the VRAM of the reference implementation at similar accuracy, which is what lets it sit next to the LLM on a 4 GB GPU. |
-| LLM | Ollama running `llama3.2:3b` | Handles GGUF quantization and GPU offload with no extra setup. Chosen over `qwen2.5:3b-instruct`, which scored comparably but read less naturally aloud. |
+| LLM | Ollama running `gemma3n:e2b` | Handles GGUF quantization and GPU offload with no extra setup. One model for English/Hindi/Tamil (see "Multilingual support" below for why) at ~1.7GB VRAM. |
 | TTS | Piper | Small ONNX voice model. Synthesizes faster than real time on CPU. |
 | DSP | librosa | RMS measurement, pitch tracking, and onset detection in the preprocessing stage. |
 
@@ -83,6 +83,242 @@ HTTP call to Ollama on `localhost:11434`.
 
 The system prompt holds the LLM to one to three plain sentences, with no Markdown
 tables, lists, or symbols that a TTS engine would read aloud awkwardly.
+
+## Multilingual support (Hindi & Tamil)
+
+`WHISPER_LANGUAGE=auto` (the default) lets faster-whisper detect the spoken
+language per utterance -- English, Hindi, or Tamil -- instead of forcing
+English. The browser UI has a language selector (top right) to force a
+language instead of relying on detection, useful on a short/ambiguous clip.
+
+- **STT**: no new model needed -- faster-whisper's multilingual checkpoint
+  already covers Hindi and Tamil. Accuracy is expected to be somewhat lower
+  than English (Whisper was trained on far less Hindi/Tamil audio, Tamil
+  more so than Hindi); `medium` or larger is recommended over the repo
+  default `small` for non-English use.
+- **LLM**: the system prompt instructs the model to reply in the same
+  language it was addressed in. Live testing (real requests against a
+  running server, not a formal benchmark) went through several
+  general-purpose models (`llama3.2:3b`, `qwen2.5:3b/7b-instruct`) that
+  were reliably fluent in English and Hindi but inconsistent-to-garbled
+  in Tamil regardless of size -- Tamil is simply underrepresented in
+  their training data. That led to an earlier dual-model setup (a
+  Tamil-specialized Llama-2 fine-tune routed only for Tamil, since it
+  broke on Hindi), which worked but meant Ollama couldn't keep both
+  models resident on a 4GB GPU at once -- a language switch mid-
+  conversation paid a ~20-25s model-reload penalty. `gemma3n:e2b` (an
+  Ollama model, ~1.7GB VRAM) replaced that setup after live testing found
+  it the only one of everything tried that was coherent in all three
+  languages -- see `OLLAMA_MODEL` in `.env.example`. No manual
+  `ollama pull` needed: `chat_web.py` pulls it itself in the background
+  on first startup. A `OLLAMA_MODEL_TA` escape hatch still exists in
+  `config.py` (empty by default, meaning "no override") in case a future
+  language needs the same per-language routing gemma3n:e2b made
+  unnecessary -- see `src/chat_web.py`'s `get_ollama_model_for_language()`.
+- **TTS**: English and Hindi both go through Piper (`en_US-lessac-medium`,
+  `hi_IN-pratham-medium`, both in `models/piper/`) -- same small local
+  binary, just a different voice file per language. **Piper ships no Tamil
+  voice at all.** Tamil speech instead goes through a separate engine,
+  [`src/indic_tts.py`](src/indic_tts.py) -- AI4Bharat's FastPitch+HiFiGAN
+  checkpoint (their "Indic-TTS" project), run through coqui-tts's
+  `Synthesizer` -- on by default (`TAMIL_TTS_ENABLED=1`). No manual setup
+  step is needed: `indic_tts.py` installs `requirements-indic-tts.txt`
+  and downloads the ~1.5GB checkpoint itself the first time Tamil speech
+  is actually requested (`chat_web.py` also kicks both off proactively in
+  the background at startup, so they're usually already done by the time
+  a real request needs them). Set `TAMIL_TTS_ENABLED=0` to opt out
+  entirely on a deployment that only ever needs English/Hindi.
+- **Why Tamil TTS switched engines**: this project originally used
+  AI4Bharat's `indic-parler-tts` (a large autoregressive transformer),
+  which needed a CUDA GPU to be usably fast (~20-25s per short reply even
+  on GPU; multiple minutes on CPU) and shared this project's small 4GB
+  dev GPU with Whisper STT -- a real, live-caught GPU-lock contention bug
+  where any Tamil TTS call froze every other in-flight request (any
+  language) for its full duration. Live comparison against AI4Bharat's
+  FastPitch+HiFiGAN checkpoint found it both faster (~1.5-2s per sentence
+  on CPU alone, no GPU needed at all) and more accurate (round-tripping
+  synthesized audio back through Whisper STT came back near-perfect, vs.
+  genuine word-level errors for indic-parler-tts on the same sentences) --
+  FastPitch and HiFiGAN are both small, non-autoregressive models, the
+  same architecture family as Piper, which is why Piper was already fast.
+  Switching resolved the GPU-lock contention as a side effect: Tamil TTS
+  no longer touches the GPU, so there's nothing left to contend with
+  Whisper over. `MAX_SPEECH_CHARS_TA` in `src/pipeline.py` still caps how
+  much of one chunk gets spoken (180 chars, vs. 280 for Piper) as a safety
+  net against a pathological run-on sentence -- see that module's comment
+  for details, and its `truncate_for_speech()` for how the cut always
+  lands on a sentence boundary.
+- A genuine bug caught while building this: Piper's own console-script
+  subprocess decoded stdin using Windows' system codepage instead of UTF-8
+  unless the parent process happened to already have `PYTHONIOENCODING` set
+  -- silently corrupting any non-ASCII text (Devanagari, Tamil script; this
+  never surfaced with English). Fixed at the time by explicitly setting
+  `PYTHONIOENCODING`/`PYTHONUTF8` on the Piper subprocess's own
+  environment; later removed entirely (not just made moot) when Piper
+  moved from a subprocess-per-call to a cached in-process `PiperVoice`
+  (see `synthesize_speech()`) -- no subprocess means no codepage to get
+  wrong in the first place.
+
+Verified end-to-end on this machine: real Hindi text synthesized by Piper,
+fed back through faster-whisper, came back auto-detected as `hi` with a
+near-exact transcript; the same round-trip through the current Tamil TTS
+engine (AI4Bharat FastPitch+HiFiGAN, see "Multilingual support" above) came
+back near-perfect too. `gemma3n:e2b` produces fluent, on-topic replies in
+English, Hindi, and Tamil in live testing. Not yet run as a byte-for-byte
+accuracy benchmark the way English STT was (see below) -- that's the
+natural next step before calling this production-ready.
+
+## Continuous learning (STT correction feedback)
+
+Off by default (`LEARNING_ENABLED=0`). When off, `/api/transcribe`'s
+response is exactly what it was before this feature existed. This is the
+foundation phase of a larger plan: capture corrections reliably first, learn
+from them safely second, only later use them to improve the base model
+itself. See [`src/learning/`](src/learning) for the code.
+
+Turn it on with `LEARNING_ENABLED=1` in `.env` (see `.env.example` for every
+sub-flag). Four independent switches, all effective only while the master
+flag is on:
+
+- `LEARNING_FEEDBACK_ENABLED`: lets the browser UI submit corrections.
+- `LEARNING_PERSONALIZED_CORRECTION_ENABLED`: looks up a profile's own past
+  corrections at transcribe time.
+- `LEARNING_CONTEXT_AWARE_ENABLED`: scores candidate corrections against the
+  current sentence instead of just the phrase.
+- `LEARNING_AUTO_APPLY_ENABLED`: separate from the three above, and off by
+  default even when they're all on. This is the one flag that rewrites what
+  gets sent to the LLM without the user confirming it first.
+
+### How a correction is captured
+
+Voice-transcribed messages in the browser UI get a small "Correct" button.
+Editing and saving posts to `POST /api/feedback`, which writes one row to a
+SQLite database (`data/learning/feedback.db`, gitignored) via
+[`src/learning/feedback_store.py`](src/learning/feedback_store.py). That
+table is append-only by database contract, not just convention: a trigger
+rejects any `UPDATE` or `DELETE` against it, so no code path, buggy or not,
+can lose or alter a correction once it's recorded. Original and corrected
+text are stored as separate fields; a word-level diff
+([`src/learning/diffing.py`](src/learning/diffing.py), stdlib `difflib`) is
+computed at write time, so "I went to Chennai with John" becoming "...with
+Jon" is stored as a single `replace("John", "Jon")`, not "the sentence
+changed."
+
+### How a correction is used
+
+[`src/learning/correction_memory.py`](src/learning/correction_memory.py)
+derives a separate, rebuildable table of per-profile correction rules
+(phrase pairs with a frequency and a recency) from the feedback log. It
+never writes to the feedback log, so `correction_rules` can be deleted and
+rebuilt at any time without losing history.
+[`src/learning/correction_engine.py`](src/learning/correction_engine.py)
+runs at transcribe time: for each of *this profile's* rules that matches a
+whole word span in the new transcript, it scores the match (exact/fuzzy
+phrase similarity, context word overlap, frequency, recency, STT confidence,
+all deterministic, see
+[`src/learning/correction_scoring.py`](src/learning/correction_scoring.py);
+no embeddings, no vector search, no LLM call) and returns one of three
+outcomes: below `LEARNING_SUGGEST_THRESHOLD` the original is kept; above it
+the correction is surfaced as a suggestion; above
+`LEARNING_AUTO_APPLY_THRESHOLD` (and only with `LEARNING_AUTO_APPLY_ENABLED`
+and `LEARNING_CONTEXT_AWARE_ENABLED` both on) it's applied automatically,
+with the untouched raw STT text still returned alongside it.
+
+A rule like `"four" -> "for"` cannot become a blanket find-and-replace: if
+the current sentence shares no words with the context the rule was learned
+in, the match is dropped outright rather than merely scored low. Rules are
+also strictly scoped per profile, a lightweight, no-auth local id generated
+by the browser and stored in `localStorage` (see
+[`src/learning/profiles.py`](src/learning/profiles.py); not real
+authentication, appropriate for a single-machine offline app). One profile's
+corrections can never affect another's.
+
+### Audio persistence
+
+Also off by default (`LEARNING_PERSIST_AUDIO_ENABLED=0`), independent of
+every flag above. STT fine-tuning needs (audio, corrected transcript)
+pairs, not text alone, so this exists specifically to feed that. When on,
+the processed audio for an accepted transcription is held in memory only
+(never written to disk) via
+[`src/learning/audio_cache.py`](src/learning/audio_cache.py); it's written
+to `LEARNING_AUDIO_DIR` (`data/learning/audio/`, gitignored) only at the
+moment a correction is actually submitted for that specific transcription.
+Audio for the transcriptions nobody corrects, which is most of them, is
+never written anywhere.
+
+### Building a training dataset
+
+[`src/learning/dataset_builder.py`](src/learning/dataset_builder.py) turns
+accumulated feedback events into a versioned, reproducible dataset:
+
+```python
+from learning import dataset_builder
+manifest = dataset_builder.build_dataset("data/learning/feedback.db", "data/learning/datasets")
+```
+
+It selects events that have a corrected transcript, a real audio file on
+disk above a minimum size, the target language, and aren't a near-duplicate
+of another selected event; everything else is counted and reported, not
+silently dropped. Output is `data/learning/datasets/v<N>/manifest.csv` (a
+deterministic 85/15 train/eval split, hashed from each event's id so
+re-running the builder on the same data reproduces the same split) plus
+`dataset.json` with the selection counts and a content hash.
+
+### Fine-tuning (LoRA/PEFT)
+
+[`src/learning/training.py`](src/learning/training.py) fine-tunes the base
+Whisper model with LoRA ([`peft`](https://github.com/huggingface/peft),
+targeting the attention projection layers) on a dataset's train split,
+merges the adapter, and converts the result to CTranslate2 with
+`ct2-transformers-converter` (already installed; it ships with the
+`ctranslate2` package in `requirements.txt`) so it's a drop-in replacement
+for the stock model faster-whisper loads. It needs `torch`, `transformers`,
+and `peft`, deliberately kept out of every other requirements file -- see
+[`requirements-training.txt`](requirements-training.txt) -- so installing
+them is opt-in and `chat_web.py` never depends on them. Run it as:
+
+```bash
+pip install -r requirements-training.txt   # multi-GB download; do this once
+python -m learning.training --dataset-version v1
+```
+
+It always evaluates the candidate against the current production model on
+the held-out ("eval") split first
+([`src/learning/evaluation.py`](src/learning/evaluation.py): plain word
+error rate, no new dependency) and prints the comparison; it never promotes
+automatically. Promotion additionally requires both `--promote` on the
+command line *and* the evaluation actually recommending it (a meaningful
+relative WER improvement with no single held-out example regressing badly)
+-- see
+[`src/learning/model_registry.py`](src/learning/model_registry.py), which
+tracks every trained version, which one is in production, and supports
+`rollback()` to the previous one.
+
+**No fine-tuning has been run in this repository.** The infrastructure
+above is complete and tested (dataset building, WER evaluation, and the
+registry's promotion/rollback logic all have unit tests that don't need
+torch installed at all), but running it for real needs real
+(audio, corrected-transcript) pairs, and `data/learning/feedback.db` is
+currently empty -- this feature only just shipped, disabled by default.
+Fabricating placeholder examples to produce a "trained" model would be
+exactly the kind of superficial result this project's own benchmark
+history argues against (see [Benchmark](#benchmark)). The path to a real
+first fine-tune is: turn on `LEARNING_ENABLED=1` and
+`LEARNING_PERSIST_AUDIO_ENABLED=1`, use the app normally, correct
+transcripts as they come up, then build a dataset and run the command
+above once enough examples exist.
+
+### Not yet implemented
+
+- Personalized-memory scoring more sophisticated than the deterministic
+  baseline in [How a correction is used](#how-a-correction-is-used).
+- A held-out human validation workflow that sets a feedback event's
+  `validation_status` (the dataset builder already reads that field and
+  excludes `"rejected"`; nothing writes anything but the default
+  `"unvalidated"` yet).
+- Wiring this into `src/cli.py`: the terminal interface reimplements its
+  own loop independently of `chat_web.py` and isn't touched by this phase.
+- An actually-deployed fine-tuned model: see above.
 
 ## Benchmark
 
@@ -136,10 +372,24 @@ pip install -r requirements.txt         # CPU
 environment exactly, use [`requirements-frozen.txt`](requirements-frozen.txt)
 instead (fully resolved versions from a working CPU install).
 
+English and Hindi need nothing extra (Piper voices for both ship in
+`models/piper/`). Tamil TTS is on by default and needs a separate, heavier
+engine -- see [Multilingual support](#multilingual-support-hindi--tamil) --
+but nothing to install by hand: `src/indic_tts.py` runs
+
+```bash
+pip install -r requirements-indic-tts.txt
+```
+
+itself, automatically, the first time Tamil speech is actually requested
+(set `TAMIL_TTS_ENABLED=0` to opt out and skip this entirely). If you'd
+rather pre-install it yourself ahead of time (e.g. to avoid that first-use
+delay), the same command works fine to run manually too.
+
 Pull the model:
 
 ```bash
-ollama pull llama3.2:3b
+ollama pull gemma3n:e2b
 ```
 
 Check the install. Reports on CUDA, faster-whisper, Ollama, and Piper:
@@ -163,11 +413,12 @@ Local Voice Chatbot -- setup verification
   PASS -- model loaded and ran inference on cuda.
 
 [3/4] Checking Ollama server + a test generation...
-  Ollama is running. Installed models: ['qwen2.5:3b-instruct', 'llama3.2:3b']
-  PASS -- model responded: 'OK.'
+  Ollama is running. Installed models: ['gemma3n:e2b']
+  Cold-starting 'gemma3n:e2b' (first load can take a while)...
+  PASS -- 'gemma3n:e2b' responded: "What's on your mind?"
 
 [4/4] Checking Piper TTS synthesis...
-  PASS -- wrote logs\_verify_piper_test.wav (125484 bytes).
+  PASS -- wrote logs\_verify_piper_test.wav (128556 bytes).
 
 ============================================================
 Summary
@@ -201,6 +452,33 @@ Flask's development server:
 $env:PRODUCTION = 1; python src/chat_web.py
 ```
 
+#### Conversational controls
+
+Everything below is client-side JavaScript in [`src/web_chat/index.html`](src/web_chat/index.html) --
+no backend changes, no new dependencies, and each one degrades independently
+(turning one off never breaks another):
+
+- **Auto-stop on silence.** Recording stops on its own roughly 0.8s after you
+  stop talking (a simple RMS-energy check via the Web Audio API, not a
+  webrtcvad port -- see the code comments for why). Manual tap-to-stop still
+  works as a fallback at all times.
+- **Barge-in.** Tapping the mic or typing a message always cuts the
+  assistant's current speech off immediately, mirroring how ChatGPT/Claude
+  voice let you talk over them. Every reply also gets an explicit "Stop"
+  button next to "Replay".
+- **Hands-free mode** (🔁 toggle). After each reply finishes speaking, the
+  mic reopens automatically -- no tapping between turns. Off by default.
+- **Wake word** (👂 toggle). Say "hey chatbot" to start listening from idle,
+  like "Hey Siri"/"Hey Google" -- but implemented by reusing the local
+  Whisper model already running (no third-party wake-word engine, no
+  account/API key, fully offline), so background speech gets a brief local
+  transcription check and is discarded unless it matches. Off by default;
+  turning it on requests microphone access immediately, and a toast explains
+  what's happening the first time.
+
+None of these require the continuous-learning layer below -- they work
+identically whether `LEARNING_ENABLED` is on or off.
+
 ### Terminal
 
 ```bash
@@ -212,7 +490,7 @@ Voice activity detection drives capture. Speak, then pause.
 ## Tests
 
 ```bash
-pytest       # 42 tests; the GPU, Ollama, and the microphone are all mocked
+pytest       # 150 tests; the GPU, Ollama, and the microphone are all mocked
 ```
 
 CI runs the same suite plus `ruff` on every push
@@ -235,7 +513,13 @@ on the web endpoints, and retry-with-backoff on the Ollama client.
 
 Left out by choice: authentication, multi-user support, containerization, and
 packaging. This is a single-user application meant to run on the machine in front
-of you.
+of you. The continuous-learning layer's profile id is a matching lightweight,
+no-auth abstraction, not a step toward real multi-tenancy; see
+[Continuous learning](#continuous-learning-stt-correction-feedback).
+
+`src/cli.py` is intentionally not wired into the continuous-learning layer: it
+reimplements its own capture-to-speech loop independently of `chat_web.py`
+rather than sharing it, and extending it adds risk for no benefit yet.
 
 ## Project layout
 
@@ -248,9 +532,23 @@ src/
   cuda_dlls.py         Windows CUDA DLL path fix
   chat_web.py          browser chat UI (web_chat/)
   record_web.py        dataset recorder UI (web_recorder/)
+  browser_audio.py     decodes browser MediaRecorder audio (webm/ogg) to float32 PCM via PyAV
   cli.py               terminal interface with live VAD
   benchmark.py         raw-vs-preprocessed accuracy benchmark
-tests/                 42 pytest tests, fully mocked
+  indic_tts.py          Tamil TTS via AI4Bharat FastPitch+HiFiGAN (needs requirements-indic-tts.txt)
+  learning/            continuous-learning STT correction feedback (off by default)
+    feedback_store.py    immutable feedback events (SQLite, UPDATE/DELETE blocked by triggers)
+    diffing.py            word-level diff between original and corrected transcripts
+    correction_memory.py  derived, rebuildable per-profile correction rules
+    correction_scoring.py pure scoring primitives (no ML, no embeddings)
+    correction_engine.py  keep / suggest / auto-apply decision, run at transcribe time
+    profiles.py            local no-auth profile/session id resolution
+    audio_cache.py          in-memory bridge to opt-in audio persistence
+    dataset_builder.py       builds versioned training datasets from feedback
+    evaluation.py             WER computation, baseline-vs-candidate comparison
+    model_registry.py          trained-model versioning, promotion gating, rollback
+    training.py                 LoRA/PEFT fine-tuning entry point (needs requirements-training.txt)
+tests/                 150 pytest tests, fully mocked
 docs/                  functional and technical specification (PDF + HTML sources)
 ```
 
