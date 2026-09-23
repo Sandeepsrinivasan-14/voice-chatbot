@@ -1,0 +1,15 @@
+# Optional. Only needed to actually run STT fine-tuning
+# (python -m learning.training, see src/learning/training.py). Not needed
+# for chat_web.py, cli.py, record_web.py, or any part of the real-time
+# pipeline -- that's the whole point of keeping this a separate file.
+#
+# Multi-GB download (torch's CUDA wheels especially). Install with:
+#   pip install -r requirements-training.txt
+#
+# faster-whisper/ctranslate2 (already in requirements.txt) are enough to
+# LOAD and evaluate a trained model; these three are only needed to
+# actually produce one.
+
+torch>=2.2.0
+transformers>=4.40.0
+peft>=0.10.0
