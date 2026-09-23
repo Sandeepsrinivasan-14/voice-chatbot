@@ -10,23 +10,30 @@ Every network-shaped call in this file targets 127.0.0.1 only:
     calls once the model is downloaded (see verify_setup.py).
   - Ollama: talks to http://localhost:11434, a server this machine is
     running itself. No calls leave the box.
-  - Piper: invokes a local `piper` binary against a local .onnx voice
-    model file. No network involved at all.
+  - Piper: runs in-process via `piper.voice.PiperVoice` against a local
+    .onnx voice model file. No network involved at all.
 To prove this to yourself: disable networking and re-run this file (see
 README section 7) -- it should behave identically.
 """
 
 from __future__ import annotations
 
+import atexit
 import json
 import logging
 import logging.handlers
 import os
 import queue
+import re
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from piper.voice import PiperVoice
 
 import numpy as np
 import requests
@@ -65,12 +72,15 @@ WHISPER_COMPUTE_TYPE_GPU = CONFIG.whisper_compute_type_gpu
 WHISPER_COMPUTE_TYPE_CPU = CONFIG.whisper_compute_type_cpu
 BEAM_SIZE_FAST = CONFIG.beam_size_fast
 BEAM_SIZE_RETRY = CONFIG.beam_size_retry
+WHISPER_LANGUAGE = CONFIG.whisper_language  # "auto" or a forced "en"/"hi"/"ta"
 
 OLLAMA_URL = CONFIG.ollama_url
 OLLAMA_MODEL = CONFIG.ollama_model
 
-PIPER_EXECUTABLE = CONFIG.piper_executable
+PIPER_EXECUTABLE = CONFIG.piper_executable  # kept only for verify_setup.py's own CLI smoke test;
+# synthesize_speech() below no longer shells out to it (see _load_piper_voice).
 PIPER_MODEL_PATH = CONFIG.piper_model_path
+PIPER_VOICES = CONFIG.piper_voices  # {"en": ..., "hi": ...} -- Piper-speakable languages
 
 LOG_DIR = CONFIG.log_dir
 LOG_FILE = CONFIG.pipeline_log_path
@@ -240,41 +250,86 @@ def load_whisper_model():
         return model, "cpu"
 
 
-def transcribe(model, audio: np.ndarray, beam_size: int = BEAM_SIZE_FAST):
-    """Runs faster-whisper on already-preprocessed audio. Returns
-    (text, segments_list) -- segments carry the avg_logprob confidence
-    scores the confidence_check layer needs.
+def load_whisper_model_from_path(model_path: str):
+    """Same GPU-first/CPU-fallback loading as load_whisper_model(), but for
+    an arbitrary local CTranslate2 model directory instead of
+    CONFIG.whisper_model_size -- used to load a continuous-learning
+    candidate/production model (see learning/model_registry.py) rather
+    than a stock faster-whisper size name. faster-whisper's WhisperModel
+    accepts either interchangeably, so this only differs from
+    load_whisper_model() in not reading WHISPER_MODEL_SIZE/compute-type
+    config at all: the caller passes the exact path it wants loaded.
     """
-    segments_iter, _info = model.transcribe(
+    from faster_whisper import WhisperModel  # local import: heavy, load once
+
+    try:
+        model = WhisperModel(model_path, device="cuda", compute_type=WHISPER_COMPUTE_TYPE_GPU)
+        _smoke_test_transcribe(model)
+        logger.info("faster-whisper loaded on GPU from %s", model_path)
+        return model, "cuda"
+    except Exception as exc:
+        logger.warning("GPU path unusable for %s (%s), falling back to CPU.", model_path, exc)
+        model = WhisperModel(model_path, device="cpu", compute_type=WHISPER_COMPUTE_TYPE_CPU)
+        logger.info("faster-whisper loaded on CPU from %s", model_path)
+        return model, "cpu"
+
+
+def transcribe(
+    model, audio: np.ndarray, beam_size: int = BEAM_SIZE_FAST, language: str | None = None
+):
+    """Runs faster-whisper on already-preprocessed audio. Returns
+    (text, segments_list, detected_language) -- segments carry the
+    avg_logprob confidence scores the confidence_check layer needs.
+
+    `language` is a forced ISO code ("en"/"hi"/"ta"/...), or None/"auto" to
+    let faster-whisper detect the spoken language itself -- this is what
+    makes Hindi/Tamil (not just English) transcribable; forcing a language
+    used to be hardcoded to "en" here.
+    """
+    forced_language = None if language in (None, "auto") else language
+    segments_iter, info = model.transcribe(
         audio,
-        language="en",
+        language=forced_language,
         beam_size=beam_size,
         vad_filter=False,  # we already did VAD on capture; avoid double-gating
     )
     segments = list(segments_iter)
     text = " ".join(seg.text.strip() for seg in segments).strip()
-    return text, segments
+    return text, segments, info.language
 
 
-def transcribe_with_confidence(model, audio: np.ndarray):
+def transcribe_with_confidence(model, audio: np.ndarray, language: str | None = None):
     """Implements the confidence-aware retry policy from confidence_check.py:
     fast greedy decode -> if low-confidence, retry once with a wider beam
     search -> if still low-confidence, give up and signal ASK_TO_REPEAT
     rather than passing a guess to the LLM.
+
+    `language` forces a language ("en"/"hi"/"ta") instead of relying on
+    detection; defaults to CONFIG.whisper_language ("auto" out of the box).
+    Returns (text, result, detected_language) -- detected_language is
+    whatever faster-whisper actually identified (or the forced language).
     """
-    text, segments = transcribe(model, audio, beam_size=BEAM_SIZE_FAST)
+    requested_language = WHISPER_LANGUAGE if language is None else language
+    text, segments, detected_language = transcribe(
+        model, audio, beam_size=BEAM_SIZE_FAST, language=requested_language
+    )
     result = evaluate(
         segments, text, beam_size_used=BEAM_SIZE_FAST, attempt=1, is_retry_attempt=False
     )
     if result.decision == Decision.ACCEPTED:
-        return text, result
+        return text, result, detected_language
 
     logger.info("Low confidence on first pass, retrying with beam_size=%d", BEAM_SIZE_RETRY)
-    text, segments = transcribe(model, audio, beam_size=BEAM_SIZE_RETRY)
+    # Force whatever language the first pass settled on, so the retry can't
+    # flip-flop to a different language guess on the same audio.
+    retry_language = detected_language if requested_language == "auto" else requested_language
+    text, segments, detected_language = transcribe(
+        model, audio, beam_size=BEAM_SIZE_RETRY, language=retry_language
+    )
     result = evaluate(
         segments, text, beam_size_used=BEAM_SIZE_RETRY, attempt=2, is_retry_attempt=True
     )
-    return text, result
+    return text, result, detected_language
 
 
 # --------------------------------------------------------------------
@@ -291,7 +346,10 @@ SYSTEM_PROMPT = (
     "You are a helpful voice assistant. Your replies are converted to "
     "speech and spoken aloud, so keep answers short: 1-3 plain "
     "conversational sentences. Never use lists, headers, markdown, or "
-    "any formatting that only makes sense in writing."
+    "any formatting that only makes sense in writing. Always reply in "
+    "the same language the user just spoke or wrote in -- English, "
+    "Hindi, or Tamil -- never translate to a different language than "
+    "the one you were addressed in."
 )
 
 
@@ -349,23 +407,222 @@ def generate_response(prompt: str, model: str = OLLAMA_MODEL, on_token=None) -> 
 
 
 # --------------------------------------------------------------------
-# 4. TTS (Piper, local binary + local voice model)
+# 4. TTS (Piper, in-process voice model)
 # --------------------------------------------------------------------
-def synthesize_speech(text: str, out_path: str = os.path.join(LOG_DIR, "_tts_out.wav")) -> str:
-    """Runs the local `piper` executable against a local voice model
-    file. Piper reads text on stdin and writes a wav file -- no network
-    call of any kind is involved.
+# SYSTEM_PROMPT above only *asks* the LLM for "1-3 plain conversational
+# sentences" -- it has no way to enforce that, and on a confusing/garbled
+# input the model can ignore it and ramble for several paragraphs. That's
+# merely awkward for Piper/indic_tts.py (both fast, non-autoregressive
+# models now -- see indic_tts.py's docstring for why Tamil switched off
+# indic-parler-tts), but still worth a hard cap: an unbounded reply is an
+# unbounded wait no matter how fast the model is per character. So this
+# is enforced here, not just requested in the prompt: speech is capped at
+# MAX_SPEECH_CHARS, cut at the last sentence boundary within that limit
+# (never mid-sentence) so what IS spoken still sounds complete.
+MAX_SPEECH_CHARS = 280
+# Tamil gets a tighter cap too, but its job is a per-CHUNK safety net, not
+# a whole-reply truncation: chat_web.py's index.html sentence-chunks a
+# reply CLIENT-SIDE before ever calling /api/tts, so in the common case
+# this function already receives one sentence at a time. This only
+# matters for one pathological run-on "sentence" with no punctuation
+# before the next boundary. 180 comfortably fits one real full sentence
+# (90 often cut a real sentence off mid-thought). Like SPEECH_MARGIN /
+# VAD_RMS_ABS_FLOOR in index.html, this was tuned by hand, not derived --
+# adjust it if your own hardware differs.
+MAX_SPEECH_CHARS_TA = 180
+_SENTENCE_END_RE = re.compile(r"[.!?।॥]")  # latin + Devanagari/Indic full stops
+
+
+def truncate_for_speech(text: str, max_chars: int = MAX_SPEECH_CHARS) -> str:
+    """Cuts `text` down to at most `max_chars`, preferring to end on the
+    last sentence boundary found within that window so speech never
+    trails off mid-sentence. Falls back to a hard cut if no sentence
+    boundary exists in range (e.g. one long run-on sentence).
     """
-    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
-    cmd = [PIPER_EXECUTABLE, "--model", PIPER_MODEL_PATH, "--output_file", out_path]
-    proc = subprocess.run(
-        cmd, input=text.encode("utf-8"), capture_output=True
+    if len(text) <= max_chars:
+        return text
+    window = text[:max_chars]
+    boundaries = [m.end() for m in _SENTENCE_END_RE.finditer(window)]
+    if boundaries:
+        return window[: boundaries[-1]].strip()
+    return window.rstrip() + "..."
+
+
+# --------------------------------------------------------------------
+# Tamil TTS runs in its own OS process (src/indic_tts_worker.py), not
+# in-process. This isolation was originally built because the old engine
+# (indic-parler-tts) shared a small 4GB GPU with faster-whisper and could
+# segfault the entire process outright -- this project's chat_web.py
+# server died silently (no Python traceback, just gone) while a Tamil
+# TTS generation was running. The current engine (AI4Bharat's
+# FastPitch+HiFiGAN, see indic_tts.py) runs on CPU and no longer has that
+# specific GPU-contention crash risk, but the isolation is kept anyway:
+# it's still a large foreign dependency tree (coqui-tts, numba, etc.)
+# with native extensions, and a try/except still can't catch a native
+# crash in-process -- a separate worker means one can never take down
+# Whisper or English/Hindi TTS with it. The worker loads the model once
+# and stays warm across calls; only a crash or the timeout below
+# triggers a respawn.
+_indic_worker_process: subprocess.Popen | None = None
+_indic_worker_lock = threading.Lock()
+# Measured live on this project's own dev machine: a genuinely cold
+# worker -- a brand new OS process paying Python startup + import (torch,
+# coqui-tts, numba JIT) + model load from disk, all from scratch -- took
+# ~35s; every request after that (same warm worker) took ~1.5-2s per
+# sentence. Both dramatically faster than the old indic-parler-tts
+# engine's 20-150s, but the cold case is meaningfully slower than
+# reusing an already-warm Python process for the same load would
+# suggest -- an earlier version of this timeout (60s) and index.html's
+# client-side TTS_TIMEOUT_MS_TA (30s) were both based on that
+# warm-process number and cut it too close live. This timeout also
+# covers a from-scratch checkpoint download on a slow connection on a
+# machine's very first-ever Tamil request (chat_web.py also kicks that
+# download off proactively at startup so it's usually already done by
+# the time a real request needs it -- see predownload_in_background()).
+_INDIC_WORKER_TIMEOUT_S = 90
+
+
+def _indic_worker_script_path() -> str:
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "indic_tts_worker.py")
+
+
+def _spawn_indic_worker() -> subprocess.Popen:
+    return subprocess.Popen(
+        [sys.executable, _indic_worker_script_path()],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, bufsize=1,  # line-buffered: matches the worker's one-JSON-object-per-line protocol
     )
-    if proc.returncode != 0:
-        raise RuntimeError(
-            f"Piper synthesis failed (exit {proc.returncode}): "
-            f"{proc.stderr.decode(errors='replace')}"
-        )
+
+
+def _kill_indic_worker() -> None:
+    global _indic_worker_process
+    if _indic_worker_process is not None:
+        try:
+            _indic_worker_process.kill()
+        except Exception:  # noqa: BLE001 -- already dead is fine, that's what we wanted anyway
+            pass
+        _indic_worker_process = None
+
+
+atexit.register(_kill_indic_worker)  # don't leave an orphaned GPU-holding process behind on exit
+
+
+def _readline_with_timeout(stream, timeout_s: float) -> str | None:
+    """readline() with a timeout, since pipes don't support select() on
+    Windows. Returns None on timeout OR on a clean EOF (worker exited) --
+    both mean "no response came back", and the caller treats them the
+    same way (check the process's exit code to tell them apart).
+    """
+    result: queue.Queue = queue.Queue(maxsize=1)
+
+    def _reader():
+        try:
+            result.put(stream.readline())
+        except Exception:  # noqa: BLE001 -- a broken pipe mid-read is just "no response"
+            result.put("")
+
+    threading.Thread(target=_reader, daemon=True).start()
+    try:
+        line = result.get(timeout=timeout_s)
+    except queue.Empty:
+        return None
+    return line or None
+
+
+def synthesize_tamil_via_worker(text: str, out_path: str) -> str:
+    """Sends one synthesis request to the persistent Tamil TTS worker
+    process, spawning it first if it isn't running yet (or respawning it
+    if a previous call left it dead/hung). Raises RuntimeError with a
+    clear reason on any failure -- crash, timeout, or the worker's own
+    reported error -- callers already treat TTS failures this way (see
+    chat_web.py's /api/tts try/except).
+    """
+    global _indic_worker_process
+    with _indic_worker_lock:
+        if _indic_worker_process is None or _indic_worker_process.poll() is not None:
+            _indic_worker_process = _spawn_indic_worker()
+
+        try:
+            _indic_worker_process.stdin.write(json.dumps({"text": text, "out_path": out_path}) + "\n")
+            _indic_worker_process.stdin.flush()
+        except (BrokenPipeError, OSError) as exc:
+            _kill_indic_worker()
+            raise RuntimeError(f"Tamil TTS worker process is unavailable: {exc}") from exc
+
+        response_line = _readline_with_timeout(_indic_worker_process.stdout, _INDIC_WORKER_TIMEOUT_S)
+        if response_line is None:
+            returncode = _indic_worker_process.poll()
+            _kill_indic_worker()  # always respawn fresh next call, whether it crashed or just hung
+            if returncode is not None:
+                raise RuntimeError(f"Tamil TTS worker process crashed (exit code {returncode}).")
+            raise RuntimeError(f"Tamil TTS worker process timed out after {_INDIC_WORKER_TIMEOUT_S}s.")
+
+        response = json.loads(response_line)
+        if not response.get("ok"):
+            raise RuntimeError(response.get("error") or "Tamil TTS failed (no error detail given).")
+        return out_path
+
+
+# Cache of loaded PiperVoice objects, one per language -- mirrors indic_tts.
+# py's _load_model() pattern: load once from disk, reuse forever. The old
+# subprocess-per-call design paid Piper's ~60MB ONNX model load AND a fresh
+# process spawn on every single synthesis; onnxruntime's InferenceSession.
+# run() is documented safe for concurrent calls on one session, and this
+# process already serves requests on multiple threads (Flask dev threaded=
+# True / waitress's pool), so one cached voice per language can safely
+# serve overlapping requests with no extra lock -- consistent with _gpu_lock
+# in chat_web.py never having covered Piper either (it's CPU-only).
+_piper_voices: dict[str, "PiperVoice"] = {}
+_piper_voices_lock = threading.Lock()
+
+
+def _load_piper_voice(language: str):
+    """Loads (and caches) the in-process PiperVoice for `language`. See the
+    _piper_voices comment above for why this replaced a subprocess call.
+    """
+    if language in _piper_voices:
+        return _piper_voices[language]
+    with _piper_voices_lock:
+        if language not in _piper_voices:  # re-check: another thread may have loaded it first
+            from piper.voice import PiperVoice
+
+            voice_path = PIPER_VOICES.get(language, PIPER_VOICES["en"])
+            _piper_voices[language] = PiperVoice.load(voice_path)
+    return _piper_voices[language]
+
+
+def synthesize_speech(
+    text: str, out_path: str = os.path.join(LOG_DIR, "_tts_out.wav"), language: str = "en"
+) -> str:
+    """Synthesizes speech for `text` in the given language and writes a
+    wav file to `out_path`. English and Hindi go through an in-process,
+    cached `piper.voice.PiperVoice` (see _load_piper_voice) -- no subprocess,
+    no network call involved; Tamil has no Piper voice, so it's routed to
+    the separate `indic_tts` module instead (see CONFIG.tamil_tts_enabled).
+    `text` is truncated to MAX_SPEECH_CHARS (MAX_SPEECH_CHARS_TA for
+    Tamil -- see truncate_for_speech) -- the caller's full, untruncated
+    text is still whatever gets displayed/logged; only what actually gets
+    synthesized is capped. Callers doing their own sentence-chunking (see
+    index.html) already pass one sentence at a time in the common case, so
+    this cap rarely trims anything real -- it's a safety net, not the
+    primary length control.
+    """
+    text = truncate_for_speech(text, MAX_SPEECH_CHARS_TA if language == "ta" else MAX_SPEECH_CHARS)
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+
+    if language == "ta":
+        if not CONFIG.tamil_tts_enabled:
+            raise RuntimeError(
+                "Tamil speech synthesis is disabled (TAMIL_TTS_ENABLED=0). "
+                "Remove that override, or set it back to 1, to re-enable it."
+            )
+        return synthesize_tamil_via_worker(text, out_path)
+
+    import wave
+
+    voice = _load_piper_voice(language)
+    with wave.open(out_path, "wb") as wav_file:
+        voice.synthesize_wav(text, wav_file)
     return out_path
 
 
@@ -412,7 +669,9 @@ def run():
             timings.preprocess_s = time.time() - t0
 
             t0 = time.time()
-            text, conf_result = transcribe_with_confidence(whisper_model, processed_audio)
+            text, conf_result, _detected_language = transcribe_with_confidence(
+                whisper_model, processed_audio
+            )
             timings.stt_s = time.time() - t0
 
             if conf_result.decision == Decision.ASK_TO_REPEAT:

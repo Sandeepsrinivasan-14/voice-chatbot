@@ -1,0 +1,22 @@
+# Optional layer: Tamil speech synthesis (src/indic_tts.py).
+#
+# Piper (this project's default TTS engine) ships no Tamil voice, so
+# Tamil TTS uses AI4Bharat's FastPitch+HiFiGAN checkpoint instead, run
+# through coqui-tts's Synthesizer class. Deliberately runs on CPU (see
+# indic_tts.py's module docstring) -- no CUDA-specific torch build
+# needed, unlike the old indic-parler-tts engine this replaced. Still a
+# real install (~1GB of packages: coqui-tts pulls in librosa, numba,
+# transformers, etc.), which is why it's a separate optional file rather
+# than folded into requirements.txt: English and Hindi users (Piper-only)
+# never pay this cost. Install this only if TAMIL_TTS_ENABLED=1.
+#
+#   pip install -r requirements.txt -r requirements-indic-tts.txt
+
+torch>=2.2.0
+torchaudio>=2.2.0
+# coqui-tts 0.27.x's XTTS import path references a since-removed internal
+# transformers function (`isin_mps_friendly`) even though we only use its
+# FastPitch/HiFiGAN path, not XTTS -- pinning below 5.0 avoids that import
+# error entirely. Safe to lift once coqui-tts publishes a fix.
+transformers<5.0
+coqui-tts[codec]
