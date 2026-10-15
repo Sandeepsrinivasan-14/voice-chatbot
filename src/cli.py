@@ -159,10 +159,10 @@ def run_cli():
 
             console.print("[dim]Thinking...[/dim]")
             t0 = time.time()
-            response_parts = []
+            response_parts: list[str] = []
             try:
                 response = pipeline.generate_response(
-                    text, on_token=lambda tok: response_parts.append(tok)
+                    text, on_token=response_parts.append
                 )
             except RuntimeError as exc:
                 console.print(f"[bold red]{exc}[/bold red]")

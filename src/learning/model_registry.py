@@ -154,8 +154,13 @@ def rollback(registry_path: str) -> str:
     return target
 
 
+def _version_number(version: str) -> int:
+    match = re.fullmatch(r"v(\d+)", version)
+    if match is None:
+        raise ValueError(f"Malformed model version {version!r}; expected 'v<number>'")
+    return int(match.group(1))
+
+
 def list_models(registry_path: str) -> list[dict]:
     data = _load(registry_path)
-    return sorted(
-        data["models"].values(), key=lambda m: int(re.fullmatch(r"v(\d+)", m["version"]).group(1))
-    )
+    return sorted(data["models"].values(), key=lambda m: _version_number(m["version"]))

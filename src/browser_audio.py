@@ -22,10 +22,14 @@ def decode_browser_audio(raw_bytes: bytes, sample_rate: int) -> np.ndarray:
 
     container = av.open(io.BytesIO(raw_bytes))
     try:
+        if not isinstance(container, av.container.InputContainer):
+            raise TypeError("expected a readable (input) media container")
         stream = next(s for s in container.streams if s.type == "audio")
         resampler = av.AudioResampler(format="fltp", layout="mono", rate=sample_rate)
         chunks = []
         for frame in container.decode(stream):
+            if not isinstance(frame, av.AudioFrame):
+                continue  # not reachable for an audio stream; narrows the type
             for resampled in resampler.resample(frame):
                 chunks.append(resampled.to_ndarray().reshape(-1))
         # flush anything buffered in the resampler

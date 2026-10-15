@@ -143,7 +143,7 @@ class _TrainingLock:
                 return self.__enter__()
             raise TrainingLockBusy(
                 f"Training lock {self.lock_path} is held by another run; skipping this cycle."
-            )
+            ) from None
 
     def _reclaim_if_stale(self) -> bool:
         try:

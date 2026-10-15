@@ -144,7 +144,7 @@ def write_results_csv(results: list[dict]) -> None:
 
 
 def summarize(results: list[dict]) -> dict:
-    by_mod = defaultdict(lambda: {"raw": [], "prep": []})
+    by_mod: defaultdict[str, dict[str, list]] = defaultdict(lambda: {"raw": [], "prep": []})
     for r in results:
         by_mod[r["modulation"]]["raw"].append(r["raw_correct"])
         by_mod[r["modulation"]]["prep"].append(r["preprocessed_correct"])

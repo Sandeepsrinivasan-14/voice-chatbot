@@ -148,8 +148,8 @@ def _detect_and_correct_pitch(
     try:
         f0, voiced_flag, _ = librosa.pyin(
             audio,
-            fmin=librosa.note_to_hz("C2"),   # ~65 Hz
-            fmax=librosa.note_to_hz("C6"),   # ~1047 Hz
+            fmin=float(librosa.note_to_hz("C2")),   # ~65 Hz
+            fmax=float(librosa.note_to_hz("C6")),   # ~1047 Hz
             sr=sr,
         )
         voiced_f0 = f0[voiced_flag] if f0 is not None else np.array([])
