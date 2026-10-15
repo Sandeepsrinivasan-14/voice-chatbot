@@ -44,7 +44,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Callable
 
-from . import dataset_builder, evaluation, feedback_store, model_registry
+from . import dataset_builder, evaluation, model_registry
 
 logger = logging.getLogger("learning.scheduler")
 

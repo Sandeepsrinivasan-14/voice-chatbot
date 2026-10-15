@@ -18,15 +18,12 @@ from __future__ import annotations
 import json
 import os
 import time
-from dataclasses import asdict
-from types import SimpleNamespace
 
 import numpy as np
-import pytest
 import soundfile as sf
 
 from config import Config
-from learning import dataset_builder, evaluation, feedback_store, model_registry, scheduler
+from learning import feedback_store, model_registry, scheduler
 
 
 def _write_wav(path, seconds=0.5, sample_rate=16000) -> str:
