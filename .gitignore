@@ -48,3 +48,37 @@ data/learning/datasets/*
 # trained model artifacts and the registry pointing at them
 data/learning/models/*
 !data/learning/models/.gitkeep
+
+# --- hardening additions ---
+.venv/
+env/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+build/
+dist/
+
+# any env file other than the committed template
+.env.*
+!.env.example
+
+# runtime output: nothing under logs/ is source (keep only the placeholder)
+logs/*
+!logs/.gitkeep
+
+# model weights/checkpoints of any kind, wherever they land
+*.onnx
+*.onnx.json
+*.pt
+*.pth
+*.safetensors
+*.gguf
+*.ckpt
+!models/piper/README.md
+
+# local databases and OS cruft
+*.sqlite
+*.sqlite3
+.DS_Store
+Thumbs.db
