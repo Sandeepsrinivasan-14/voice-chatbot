@@ -22,12 +22,22 @@ import importlib.util
 import os
 
 
+def _is_windows() -> bool:
+    return os.name == "nt"
+
+
 def ensure_cuda_dlls_on_path() -> None:
-    if os.name != "nt":
+    if not _is_windows():
         return  # PATH-based DLL search is a Windows-only problem here
 
     for pkg_name in ("nvidia.cublas", "nvidia.cudnn", "nvidia.cuda_nvrtc"):
-        spec = importlib.util.find_spec(pkg_name)
+        try:
+            spec = importlib.util.find_spec(pkg_name)
+        except ModuleNotFoundError:
+            # find_spec("nvidia.cublas") raises (instead of returning None)
+            # when the parent `nvidia` namespace package itself is absent --
+            # i.e. a CPU-only install without requirements-gpu.txt.
+            continue
         if spec is None or not spec.submodule_search_locations:
             continue  # package not installed -- GPU path just won't be available
         pkg_dir = list(spec.submodule_search_locations)[0]
