@@ -13,7 +13,7 @@
 # (on Linux add `--add-host=host.docker.internal:host-gateway`). Piper voices
 # are not baked in; mount them at /app/models/piper (see models/piper/README.md).
 # GPU inference is out of scope for this image (use the host install for CUDA).
-FROM python:3.11-slim
+FROM python:3.14-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
