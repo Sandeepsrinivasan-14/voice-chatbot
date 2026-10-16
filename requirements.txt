@@ -19,7 +19,7 @@ faster-whisper>=1.0.3
 
 # --- audio capture / VAD / DSP ---
 sounddevice>=0.4.6          # mic capture + playback (PortAudio bindings)
-numpy>=1.26.0
+numpy>=2.5.4
 librosa>=0.10.2             # normalization, pitch/speed analysis
 soundfile>=0.12.1           # wav read/write
 webrtcvad-wheels>=2.0.11.post1   # prebuilt Windows wheels of Google's WebRTC VAD
@@ -33,7 +33,7 @@ piper-tts>=1.8.0            # local, offline neural TTS -- 1.8.0+ for the in-pro
 
 # --- CLI / reporting ---
 rich>=13.7.0                # Phase 7 CLI (status panels, live transcription)
-matplotlib>=3.8.0           # Phase 5 benchmark chart
+matplotlib>=3.11.2           # Phase 5 benchmark chart
 
 # --- web front ends (src/chat_web.py, src/record_web.py) ---
 flask>=3.0.0                 # tiny local server, binds to 127.0.0.1 only
@@ -44,4 +44,4 @@ waitress>=3.0.0              # production WSGI server (Windows-compatible,
 # extra entry needed here.
 
 # --- configuration ---
-python-dotenv>=1.0.0         # loads a local .env file, see .env.example
+python-dotenv>=1.2.4         # loads a local .env file, see .env.example

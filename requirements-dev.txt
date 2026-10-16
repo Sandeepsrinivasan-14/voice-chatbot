@@ -6,7 +6,7 @@
 # needs the ~1.3GB of CUDA wheels.
 -r requirements.txt
 pytest>=8.0.0
-ruff>=0.6.0
+ruff>=0.17.0
 mypy>=1.10.0
 types-requests
 types-waitress
