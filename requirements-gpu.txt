@@ -13,4 +13,4 @@
 # only (fully supported, automatic fallback in pipeline.load_whisper_model()).
 -r requirements.txt
 nvidia-cublas-cu12>=12.0
-nvidia-cudnn-cu12>=9.0
+nvidia-cudnn-cu12>=9.27.0.42
