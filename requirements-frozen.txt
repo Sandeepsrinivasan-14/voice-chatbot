@@ -62,7 +62,7 @@ pluggy==1.6.0
 pooch==1.9.0
 protobuf==7.36.1
 pycparser==3.0
-pyee==13.0.1
+pyee==14.0.0
 Pygments==2.21.0
 pyparsing==3.3.2
 pypdf==6.18.0
