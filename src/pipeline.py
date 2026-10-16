@@ -542,16 +542,21 @@ def synthesize_tamil_via_worker(text: str, out_path: str) -> str:
         if _indic_worker_process is None or _indic_worker_process.poll() is not None:
             _indic_worker_process = _spawn_indic_worker()
 
+        worker = _indic_worker_process
+        if worker.stdin is None or worker.stdout is None:
+            _kill_indic_worker()
+            raise RuntimeError("Tamil TTS worker process was spawned without stdio pipes.")
+
         try:
-            _indic_worker_process.stdin.write(json.dumps({"text": text, "out_path": out_path}) + "\n")
-            _indic_worker_process.stdin.flush()
+            worker.stdin.write(json.dumps({"text": text, "out_path": out_path}) + "\n")
+            worker.stdin.flush()
         except (BrokenPipeError, OSError) as exc:
             _kill_indic_worker()
             raise RuntimeError(f"Tamil TTS worker process is unavailable: {exc}") from exc
 
-        response_line = _readline_with_timeout(_indic_worker_process.stdout, _INDIC_WORKER_TIMEOUT_S)
+        response_line = _readline_with_timeout(worker.stdout, _INDIC_WORKER_TIMEOUT_S)
         if response_line is None:
-            returncode = _indic_worker_process.poll()
+            returncode = worker.poll()
             _kill_indic_worker()  # always respawn fresh next call, whether it crashed or just hung
             if returncode is not None:
                 raise RuntimeError(f"Tamil TTS worker process crashed (exit code {returncode}).")

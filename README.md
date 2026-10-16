@@ -8,7 +8,9 @@ off-pitch) is either transcribed reliably or explicitly rejected, rather than
 passed downstream as a confident mistranscription.
 
 [![Tests](https://github.com/Sandeepsrinivasan-14/voice-chatbot/actions/workflows/tests.yml/badge.svg)](https://github.com/Sandeepsrinivasan-14/voice-chatbot/actions/workflows/tests.yml)
-![Python 3.11](https://img.shields.io/badge/python-3.11-blue)
+![Python 3.11 | 3.12](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)
+![Lint: ruff](https://img.shields.io/badge/lint-ruff-261230)
+![Types: mypy](https://img.shields.io/badge/types-mypy-1f5082)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
 ![Browser chat interface](docs/img/chat-ui.png)
@@ -355,7 +357,7 @@ parity so it cannot silently come back.
 
 ## Setup
 
-Requires Python 3.11 and a running [Ollama](https://ollama.com/) install.
+Requires Python 3.11 or 3.12 and a running [Ollama](https://ollama.com/) install.
 
 ```bash
 git clone https://github.com/Sandeepsrinivasan-14/voice-chatbot.git
@@ -372,8 +374,10 @@ pip install -r requirements.txt         # CPU
 environment exactly, use [`requirements-frozen.txt`](requirements-frozen.txt)
 instead (fully resolved versions from a working CPU install).
 
-English and Hindi need nothing extra (Piper voices for both ship in
-`models/piper/`). Tamil TTS is on by default and needs a separate, heavier
+English and Hindi need no extra Python packages, but the Piper voice files
+(`.onnx` + `.onnx.json`) are large binaries that are **not** committed: download
+them into `models/piper/` first -- see [`models/piper/README.md`](models/piper/README.md)
+for the exact files and links. Tamil TTS is on by default and needs a separate, heavier
 engine -- see [Multilingual support](#multilingual-support-hindi--tamil) --
 but nothing to install by hand: `src/indic_tts.py` runs
 
@@ -487,14 +491,50 @@ python src/cli.py
 
 Voice activity detection drives capture. Speak, then pause.
 
-## Tests
+### Docker (CPU, browser UI)
 
 ```bash
-pytest       # 150 tests; the GPU, Ollama, and the microphone are all mocked
+docker build -t voice-chatbot .
+docker run --rm -p 127.0.0.1:5006:5006   -e OLLAMA_URL=http://host.docker.internal:11434   -v "$PWD/models:/app/models" -v whisper-cache:/home/app/.cache   voice-chatbot
 ```
 
-CI runs the same suite plus `ruff` on every push
-([`.github/workflows/tests.yml`](.github/workflows/tests.yml)).
+Then open <http://localhost:5006>. The container needs no audio hardware (the
+browser records and plays audio). Ollama is not bundled; point `OLLAMA_URL` at
+the one on your host (on Linux add `--add-host=host.docker.internal:host-gateway`).
+Always publish the port to `127.0.0.1` -- the app has no authentication; see
+[SECURITY.md](SECURITY.md). GPU inference is not supported in the image.
+
+## Tests and code quality
+
+```bash
+pip install -r requirements-dev.txt
+ruff check .     # lint
+mypy             # type check src/
+pytest           # ~180 tests; the GPU, Ollama, and the microphone are all mocked
+```
+
+CI ([`.github/workflows/tests.yml`](.github/workflows/tests.yml)) runs lint and
+type checking, then the suite on Python 3.11 and 3.12 (Ubuntu) plus 3.11 on
+Windows, and verifies that the Docker image builds and serves `/api/health`.
+Tests that need a GPU, large models, or real services are marked `gpu`, `slow`
+or `integration`; `gpu` tests skip themselves when no CUDA device is present.
+`pre-commit install` runs lint and type checks locally before each commit. See
+[CONTRIBUTING.md](CONTRIBUTING.md) and [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md)
+(what each `requirements-*.txt` is for).
+
+## Troubleshooting
+
+| Symptom | Cause and fix |
+| :--- | :--- |
+| `Could not reach Ollama at http://localhost:11434. Is \`ollama serve\` running?` | Start Ollama and `ollama pull gemma3n:e2b`. Using Docker or a remote host? Set `OLLAMA_URL`. |
+| `OSError: PortAudio library not found` (Linux) | `sudo apt-get install libportaudio2`. `sounddevice` loads it at import, even for the browser UI. |
+| Piper fails to load a voice / no speech | The voice `.onnx` + `.onnx.json` files are not in `models/piper/`. See [`models/piper/README.md`](models/piper/README.md), or set `PIPER_MODEL_PATH`. |
+| Whisper runs on CPU although you have an NVIDIA GPU | Install `requirements-gpu.txt`. On Windows `src/cuda_dlls.py` must run before `faster_whisper` is imported (entry points already do this). `python verify_setup.py` reports what was found. |
+| Browser mic prompt never appears | Browsers only allow microphone capture on `localhost`/HTTPS. Use `http://localhost:5006`, not a LAN IP. |
+| First Tamil reply is slow or triggers a big install | Tamil TTS auto-installs `requirements-indic-tts.txt` (~1 GB) on first use. Pre-install it, or set `TAMIL_TTS_ENABLED=0`. |
+| Port already in use | Change `CHAT_WEB_PORT` / `RECORD_WEB_PORT` in `.env`. |
+| Reachable from other machines? | It should not be: `WEB_HOST` defaults to `127.0.0.1` and there is no authentication. |
+| Anything else | Run `python verify_setup.py`, then check `logs/` (rotating files). |
 
 ## Windows and CUDA
 
@@ -511,8 +551,8 @@ Included: centralized configuration, the mocked test suite and CI, a Waitress
 server option, rotating file logs, JSON error responses with a 25 MB upload cap
 on the web endpoints, and retry-with-backoff on the Ollama client.
 
-Left out by choice: authentication, multi-user support, containerization, and
-packaging. This is a single-user application meant to run on the machine in front
+Left out by choice: authentication, multi-user support, GPU containers, and
+packaging (a CPU Docker image for the browser UI is provided). This is a single-user application meant to run on the machine in front
 of you. The continuous-learning layer's profile id is a matching lightweight,
 no-auth abstraction, not a step toward real multi-tenancy; see
 [Continuous learning](#continuous-learning-stt-correction-feedback).
@@ -548,8 +588,13 @@ src/
     evaluation.py             WER computation, baseline-vs-candidate comparison
     model_registry.py          trained-model versioning, promotion gating, rollback
     training.py                 LoRA/PEFT fine-tuning entry point (needs requirements-training.txt)
-tests/                 150 pytest tests, fully mocked
-docs/                  functional and technical specification (PDF + HTML sources)
+tests/                 ~180 pytest tests, fully mocked
+docs/                  specification (PDF + HTML sources) and REQUIREMENTS.md
+Dockerfile             CPU image for the browser UI
+.github/               CI workflow (lint, mypy, test matrix, docker) and Dependabot
+pyproject.toml         pytest, ruff, and mypy configuration
+requirements*.txt      split dependency sets, explained in docs/REQUIREMENTS.md
+SECURITY.md, CONTRIBUTING.md
 ```
 
 ## Documentation

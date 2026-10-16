@@ -160,6 +160,10 @@ class Config:
     log_backup_count: int = 3
 
     # --- web servers (chat_web.py, record_web.py) ---
+    # Bind address. Loopback by default -- the apps have no authentication,
+    # so only widen this (e.g. WEB_HOST=0.0.0.0 inside a container) when the
+    # port is published to loopback or sits behind your own access control.
+    web_host: str = "127.0.0.1"
     chat_web_port: int = 5006
     record_web_port: int = 5005
     max_upload_bytes: int = 25 * 1024 * 1024  # 25MB cap on browser audio uploads
@@ -276,6 +280,7 @@ class Config:
             ),
             tamil_tts_enabled=_env_bool("TAMIL_TTS_ENABLED", defaults.tamil_tts_enabled),
             log_dir=os.environ.get("LOG_DIR", defaults.log_dir),
+            web_host=os.environ.get("WEB_HOST", defaults.web_host).strip() or defaults.web_host,
             chat_web_port=_env_int("CHAT_WEB_PORT", defaults.chat_web_port),
             record_web_port=_env_int("RECORD_WEB_PORT", defaults.record_web_port),
             production=_env_bool("PRODUCTION", defaults.production),

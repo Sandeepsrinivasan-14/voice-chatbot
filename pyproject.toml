@@ -1,6 +1,11 @@
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra"
+addopts = "-ra --strict-markers"
+markers = [
+    "gpu: needs a CUDA GPU (auto-skipped when CUDA is unavailable)",
+    "slow: loads large models or takes more than a few seconds",
+    "integration: needs real external services (Ollama, Piper voices, audio devices)",
+]
 
 [tool.ruff]
 line-length = 100
@@ -11,8 +16,35 @@ extend-exclude = ["venv", ".venv", "data", "models", "logs"]
 # Kept deliberately small -- this is a portfolio project, not a large
 # team codebase. Unused imports/variables and obvious bugs matter most;
 # stylistic rules (import sorting, docstring conventions, etc.) don't
-# pull their weight here.
-select = ["E", "F", "W"]
+# pull their weight here. "B" (flake8-bugbear) catches real bug patterns
+# such as late-binding closures and exception chaining mistakes.
+select = ["E", "F", "W", "B"]
 ignore = [
     "E501",  # line length -- long comments/docstrings are common and fine here
 ]
+
+[tool.mypy]
+python_version = "3.11"
+mypy_path = "src"
+files = ["src"]
+explicit_package_bases = true
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+
+# Third-party packages that ship no type information, plus optional heavy
+# dependencies (torch/transformers/peft/coqui-tts) that CI deliberately does
+# not install. Scoped per-module so a typo elsewhere is still an error.
+[[tool.mypy.overrides]]
+module = [
+    "faster_whisper.*",
+    "sounddevice.*",
+    "soundfile.*",
+    "webrtcvad.*",
+    "torch.*",
+    "transformers.*",
+    "peft.*",
+    "TTS.*",
+]
+ignore_missing_imports = true

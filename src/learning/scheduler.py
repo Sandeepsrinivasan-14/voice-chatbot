@@ -44,7 +44,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Callable
 
-from . import dataset_builder, evaluation, feedback_store, model_registry
+from . import dataset_builder, evaluation, model_registry
 
 logger = logging.getLogger("learning.scheduler")
 
@@ -143,7 +143,7 @@ class _TrainingLock:
                 return self.__enter__()
             raise TrainingLockBusy(
                 f"Training lock {self.lock_path} is held by another run; skipping this cycle."
-            )
+            ) from None
 
     def _reclaim_if_stale(self) -> bool:
         try:

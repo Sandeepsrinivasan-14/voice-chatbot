@@ -39,6 +39,7 @@ def main() -> None:
         line = line.strip()
         if not line:
             continue
+        response: dict[str, object]
         try:
             request = json.loads(line)
             synthesize_to_file(request["text"], request["out_path"])

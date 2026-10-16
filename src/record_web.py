@@ -131,4 +131,4 @@ if __name__ == "__main__":
     os.makedirs(OUT_DIR, exist_ok=True)
     print(f"Saving into: {OUT_DIR}")
     print("Everything here stays on this machine -- close the tab/Ctrl+C to stop.")
-    run_app(app, host="127.0.0.1", port=CONFIG.record_web_port, name="record_web")
+    run_app(app, host=CONFIG.web_host, port=CONFIG.record_web_port, name="record_web")

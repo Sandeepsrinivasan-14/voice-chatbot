@@ -63,3 +63,26 @@ def learning_config(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(chat_web, "CONFIG", test_config)
     return test_config
+
+
+def _cuda_available() -> bool:
+    try:
+        import ctranslate2
+
+        return ctranslate2.get_cuda_device_count() > 0
+    except Exception:  # noqa: BLE001 -- any failure just means "no usable GPU"
+        return False
+
+
+def pytest_collection_modifyitems(config, items):
+    """Auto-skip tests marked `gpu` when no CUDA device is usable, so the
+    same suite runs unchanged on CI runners and on a developer GPU box.
+    (The shipped suite mocks all GPU work, so today no test carries the
+    marker; it exists for future real-hardware tests.)
+    """
+    if _cuda_available():
+        return
+    skip_gpu = pytest.mark.skip(reason="no CUDA device available")
+    for item in items:
+        if "gpu" in item.keywords:
+            item.add_marker(skip_gpu)

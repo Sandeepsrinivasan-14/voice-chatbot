@@ -48,6 +48,14 @@ class TestFromEnv:
         c = cfg.Config.from_env()
         assert c.chat_web_port == 9001
 
+    def test_web_host_defaults_to_loopback_and_is_overridable(self, monkeypatch):
+        monkeypatch.delenv("WEB_HOST", raising=False)
+        assert cfg.Config.from_env().web_host == "127.0.0.1"
+        monkeypatch.setenv("WEB_HOST", "0.0.0.0")
+        assert cfg.Config.from_env().web_host == "0.0.0.0"
+        monkeypatch.setenv("WEB_HOST", "   ")
+        assert cfg.Config.from_env().web_host == "127.0.0.1"
+
     def test_reads_bool_override(self, monkeypatch):
         monkeypatch.setenv("PRODUCTION", "1")
         c = cfg.Config.from_env()

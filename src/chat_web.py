@@ -662,4 +662,4 @@ if __name__ == "__main__":
             f"needs >={CONFIG.learning_min_new_events_for_training} new corrections)."
         )
 
-    run_app(app, host="127.0.0.1", port=CONFIG.chat_web_port, name="chat_web")
+    run_app(app, host=CONFIG.web_host, port=CONFIG.chat_web_port, name="chat_web")
