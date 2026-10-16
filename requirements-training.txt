@@ -11,5 +11,5 @@
 # actually produce one.
 
 torch>=2.2.0
-transformers>=4.40.0
+transformers>=5.19.0
 peft>=0.10.0

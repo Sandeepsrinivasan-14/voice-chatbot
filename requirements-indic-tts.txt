@@ -18,5 +18,5 @@ torchaudio>=2.2.0
 # transformers function (`isin_mps_friendly`) even though we only use its
 # FastPitch/HiFiGAN path, not XTTS -- pinning below 5.0 avoids that import
 # error entirely. Safe to lift once coqui-tts publishes a fix.
-transformers<5.0
+transformers<6.0
 coqui-tts[codec]
