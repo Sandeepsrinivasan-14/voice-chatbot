@@ -34,7 +34,7 @@ import time
 import uuid
 
 import requests
-from flask import Flask, Response, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from browser_audio import decode_browser_audio  # noqa: E402
@@ -42,7 +42,12 @@ from config import CONFIG  # noqa: E402
 import pipeline  # noqa: E402  (also wires up cuda_dlls before faster_whisper loads)
 from confidence_check import Decision  # noqa: E402
 from preprocessing import normalize_audio  # noqa: E402
-from web_common import register_error_handlers, run_app  # noqa: E402
+from web_common import (  # noqa: E402
+    register_error_handlers,
+    register_security_headers,
+    register_static_routes,
+    run_app,
+)
 
 try:
     # The continuous-learning layer (see src/learning/) is entirely
@@ -67,6 +72,8 @@ LANGUAGE_NAMES = {"en": "English", "hi": "Hindi", "ta": "Tamil"}
 app = Flask(__name__, static_folder=None)
 app.config["MAX_CONTENT_LENGTH"] = CONFIG.max_upload_bytes
 register_error_handlers(app)
+register_security_headers(app)
+register_static_routes(app, STATIC_DIR)
 _whisper_model = None
 _whisper_device = None
 _whisper_model_version = "stock"  # registry version string, or "stock" for CONFIG.whisper_model_size
@@ -281,16 +288,6 @@ def ensure_tamil_tts_checkpoint_pulled() -> None:
             "Failed to pre-download the Tamil TTS checkpoint; the first real Tamil "
             "TTS request will download it instead (and take longer than usual)."
         )
-
-
-@app.route("/")
-def index():
-    return send_from_directory(STATIC_DIR, "index.html")
-
-
-@app.route("/<path:filename>")
-def static_files(filename):
-    return send_from_directory(STATIC_DIR, filename)
 
 
 @app.route("/api/health")
