@@ -24,6 +24,7 @@ logs/_*.wav
 # editor/tool-specific state, not project content
 .serena/
 .playwright-mcp/
+.claudeignore
 
 
 # generated intermediate artefact of docs/build_pdf.py -- regenerate with
