@@ -42,6 +42,14 @@ mypy              # type check src/ (config in pyproject.toml)
 pytest -v         # full suite, no GPU/Ollama/mic required
 ```
 
+The front end has no build step. Its pure logic (`src/web_chat/js/wake.js`,
+`format.js`) is tested under Node when `node` is on your `PATH` (those tests skip
+themselves otherwise); the asset, MIME-type and Content-Security-Policy tests
+need nothing extra. If you touch the UI, run `python src/chat_web.py` and look at
+it in a browser in both themes and at phone width, and keep it offline: no CDN
+URLs, no inline `<script>`/`<style>`/`on*=` handlers (the CSP forbids them and
+`tests/test_web_assets.py` enforces it).
+
 Run all three before opening a pull request. `pre-commit run --all-files` runs
 lint and type checking plus basic hygiene hooks.
 

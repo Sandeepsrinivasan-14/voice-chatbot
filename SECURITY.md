@@ -29,6 +29,13 @@ The project is designed to run **entirely on your own machine**:
   without putting your own authenticated reverse proxy in front.
 - **Docker:** the image binds `0.0.0.0` *inside* the container; always publish
   with `-p 127.0.0.1:5006:5006`, never `-p 5006:5006`.
+- **Browser hardening.** Both web UIs ship with no third-party assets and are
+  served with a strict Content-Security-Policy (`default-src 'none'`, scripts
+  and styles from `'self'` only, no inline code, no framing), plus
+  `nosniff`, `no-referrer`, same-origin resource/opener policies and a
+  Permissions-Policy that allows the microphone for this origin only. API
+  responses are sent `Cache-Control: no-store`. `tests/test_web_assets.py`
+  fails if a CDN URL, inline script or inline handler is introduced.
 - **Uploads** to the web endpoints are capped at 25 MB (`Config.max_upload_bytes`).
 - **Personal data.** Continuous learning (`LEARNING_ENABLED`, off by default)
   stores corrected transcripts, and optionally voice audio, under
