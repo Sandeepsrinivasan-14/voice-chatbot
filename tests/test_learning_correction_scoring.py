@@ -83,12 +83,24 @@ class TestBlendedScore:
     def test_strong_match_scores_higher_than_weak_match(self):
         now = datetime.now(timezone.utc)
         strong = scoring.blended_score(
-            phrase_similarity=1.0, context_sim=1.0, frequency=5, frequency_saturation=5,
-            last_seen_at=now.isoformat(), recency_halflife_days=30, avg_logprob=-0.2, now=now,
+            phrase_similarity=1.0,
+            context_sim=1.0,
+            frequency=5,
+            frequency_saturation=5,
+            last_seen_at=now.isoformat(),
+            recency_halflife_days=30,
+            avg_logprob=-0.2,
+            now=now,
         )
         weak = scoring.blended_score(
-            phrase_similarity=0.5, context_sim=0.0, frequency=1, frequency_saturation=5,
-            last_seen_at=now.isoformat(), recency_halflife_days=30, avg_logprob=-0.2, now=now,
+            phrase_similarity=0.5,
+            context_sim=0.0,
+            frequency=1,
+            frequency_saturation=5,
+            last_seen_at=now.isoformat(),
+            recency_halflife_days=30,
+            avg_logprob=-0.2,
+            now=now,
         )
         assert strong > weak
         assert strong <= 1.0

@@ -114,9 +114,7 @@ def average_logprob(segments: list) -> float:
     if not segments:
         return -999.0  # no speech decoded at all -> definitely reject
     total_len = sum(max(seg.end - seg.start, 1e-6) for seg in segments)
-    weighted = sum(
-        seg.avg_logprob * max(seg.end - seg.start, 1e-6) for seg in segments
-    )
+    weighted = sum(seg.avg_logprob * max(seg.end - seg.start, 1e-6) for seg in segments)
     return weighted / total_len
 
 

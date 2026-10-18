@@ -49,16 +49,12 @@ class TestEvaluate:
 
     def test_first_attempt_below_threshold_retries_with_more_beams(self, tmp_path, monkeypatch):
         monkeypatch.setattr(cc, "LOG_PATH", str(tmp_path / "confidence_log.csv"))
-        result = cc.evaluate(
-            [_seg(-0.9)], "so", threshold=-0.6, is_retry_attempt=False, attempt=1
-        )
+        result = cc.evaluate([_seg(-0.9)], "so", threshold=-0.6, is_retry_attempt=False, attempt=1)
         assert result.decision == cc.Decision.RETRY_MORE_BEAMS
 
     def test_retry_still_below_threshold_asks_to_repeat(self, tmp_path, monkeypatch):
         monkeypatch.setattr(cc, "LOG_PATH", str(tmp_path / "confidence_log.csv"))
-        result = cc.evaluate(
-            [_seg(-0.9)], "so", threshold=-0.6, is_retry_attempt=True, attempt=2
-        )
+        result = cc.evaluate([_seg(-0.9)], "so", threshold=-0.6, is_retry_attempt=True, attempt=2)
         assert result.decision == cc.Decision.ASK_TO_REPEAT
 
     def test_exactly_at_threshold_is_accepted(self, tmp_path, monkeypatch):

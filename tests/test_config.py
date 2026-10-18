@@ -18,7 +18,10 @@ class TestDefaults:
 
     def test_pipeline_log_path_derives_from_log_dir(self):
         c = cfg.Config(log_dir="somewhere")
-        assert c.pipeline_log_path == "somewhere/pipeline.log" or c.pipeline_log_path == "somewhere\\pipeline.log"
+        assert (
+            c.pipeline_log_path == "somewhere/pipeline.log"
+            or c.pipeline_log_path == "somewhere\\pipeline.log"
+        )
 
     def test_config_is_frozen(self):
         c = cfg.Config()
@@ -76,15 +79,27 @@ class TestFromEnv:
 
     def test_no_env_vars_matches_bare_defaults(self, monkeypatch):
         env_vars = (
-            "SAMPLE_RATE", "WHISPER_MODEL_SIZE", "CONFIDENCE_THRESHOLD",
-            "CONFIDENCE_LOG_PATH", "OLLAMA_URL", "OLLAMA_MODEL",
-            "PIPER_EXECUTABLE", "PIPER_MODEL_PATH", "LOG_DIR",
-            "CHAT_WEB_PORT", "RECORD_WEB_PORT", "PRODUCTION",
-            "LEARNING_ENABLED", "LEARNING_FEEDBACK_ENABLED",
+            "SAMPLE_RATE",
+            "WHISPER_MODEL_SIZE",
+            "CONFIDENCE_THRESHOLD",
+            "CONFIDENCE_LOG_PATH",
+            "OLLAMA_URL",
+            "OLLAMA_MODEL",
+            "PIPER_EXECUTABLE",
+            "PIPER_MODEL_PATH",
+            "LOG_DIR",
+            "CHAT_WEB_PORT",
+            "RECORD_WEB_PORT",
+            "PRODUCTION",
+            "LEARNING_ENABLED",
+            "LEARNING_FEEDBACK_ENABLED",
             "LEARNING_PERSONALIZED_CORRECTION_ENABLED",
-            "LEARNING_CONTEXT_AWARE_ENABLED", "LEARNING_AUTO_APPLY_ENABLED",
-            "LEARNING_DB_PATH", "LEARNING_SUGGEST_THRESHOLD",
-            "LEARNING_AUTO_APPLY_THRESHOLD", "LEARNING_RULE_FREQUENCY_SATURATION",
+            "LEARNING_CONTEXT_AWARE_ENABLED",
+            "LEARNING_AUTO_APPLY_ENABLED",
+            "LEARNING_DB_PATH",
+            "LEARNING_SUGGEST_THRESHOLD",
+            "LEARNING_AUTO_APPLY_THRESHOLD",
+            "LEARNING_RULE_FREQUENCY_SATURATION",
             "LEARNING_RULE_RECENCY_HALFLIFE_DAYS",
         )
         for name in env_vars:

@@ -1,0 +1,146 @@
+  :root{
+    --bg-0:#0b0d14; --bg-1:#12162277; --card:#171b28cc; --card-border:#2a3040;
+    --text:#eef1f8; --text-dim:#9aa3b8; --text-faint:#5c6479;
+    --accent:#60a5fa; --accent-dim:#60a5fa33;
+    --danger:#f87171; --success:#34d399;
+    --radius:20px;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;}
+  body{
+    margin:0; min-height:100vh; color:var(--text);
+    background:
+      radial-gradient(60vmax 60vmax at 15% 10%, #3b82f622, transparent 60%),
+      radial-gradient(70vmax 70vmax at 90% 80%, #a78bfa22, transparent 60%),
+      var(--bg-0);
+    font-family: -apple-system, "Segoe UI", ui-sans-serif, system-ui, Roboto, Arial, sans-serif;
+    display:flex; align-items:center; justify-content:center; padding:32px 16px;
+    overflow-x:hidden;
+  }
+  .app{ width:100%; max-width:620px; }
+  header{ text-align:center; margin-bottom:28px; }
+  header h1{ font-size:1.7rem; margin:0 0 6px; letter-spacing:-0.02em; }
+  header .subtitle{ color:var(--text-dim); margin:0; font-size:0.95rem; }
+
+  .screen[hidden]{ display:none; }
+  .card{
+    background:var(--card); border:1px solid var(--card-border);
+    border-radius:var(--radius); padding:32px; backdrop-filter:blur(10px);
+    box-shadow:0 20px 60px -20px #00000088;
+    animation:rise .5s cubic-bezier(.2,.9,.25,1) both;
+  }
+  @keyframes rise{ from{opacity:0; transform:translateY(14px);} to{opacity:1; transform:none;} }
+
+  /* ---- start screen ---- */
+  .card h2{ margin-top:0; font-size:1.25rem; }
+  .card p{ color:var(--text-dim); line-height:1.55; }
+  code{ background:#0000004d; padding:2px 6px; border-radius:6px; font-size:0.85em; color:#d7ddee;}
+  .word-chip-row{ display:flex; flex-wrap:wrap; gap:8px; margin:18px 0 22px; }
+  .word-chip{
+    background:#ffffff0f; border:1px solid #ffffff1f; padding:6px 14px;
+    border-radius:999px; font-size:0.85rem; color:var(--text);
+  }
+  .words-input{
+    width:100%; padding:10px 14px; margin:6px 0 20px; border-radius:12px;
+    border:1px solid var(--card-border); background:#00000033; color:var(--text);
+    font-size:0.9rem; outline:none;
+  }
+  .words-input:focus{ border-color:var(--accent); }
+  label.field-label{ font-size:0.78rem; text-transform:uppercase; letter-spacing:.08em; color:var(--text-faint); }
+
+  .btn-primary, .btn-secondary{
+    border:none; border-radius:14px; padding:14px 22px; font-size:1rem; font-weight:600;
+    cursor:pointer; transition:transform .15s ease, box-shadow .15s ease, opacity .15s ease;
+  }
+  .btn-primary{
+    background:linear-gradient(135deg, var(--accent), #818cf8); color:#0b0d14;
+    width:100%; box-shadow:0 10px 30px -10px var(--accent-dim);
+  }
+  .btn-primary:hover{ transform:translateY(-1px); }
+  .btn-primary:disabled{ opacity:.5; cursor:not-allowed; transform:none; }
+  .btn-secondary{
+    background:#ffffff12; color:var(--text); border:1px solid #ffffff22;
+  }
+  .btn-secondary:hover{ background:#ffffff1f; }
+  .hint{ font-size:0.82rem; color:var(--text-faint); margin-top:14px; margin-bottom:0; }
+
+  /* ---- progress ---- */
+  .progress-track{
+    display:flex; gap:5px; justify-content:center; margin-bottom:20px; flex-wrap:wrap;
+  }
+  .progress-track[hidden]{ display:none; }
+  .progress-group{ display:flex; gap:5px; padding:4px 6px; border-radius:10px; }
+  .dot{
+    width:10px; height:10px; border-radius:50%; background:#ffffff1a;
+    border:1px solid #ffffff26; transition:all .25s ease;
+  }
+  .dot.current{ background:var(--accent); box-shadow:0 0 0 4px var(--accent-dim); transform:scale(1.15); }
+  .dot.done{ background:var(--success); border-color:var(--success); }
+
+  /* ---- record screen ---- */
+  .record-card{ text-align:center; }
+  .badge{
+    display:inline-block; padding:5px 14px; border-radius:999px; font-size:0.75rem;
+    font-weight:700; text-transform:uppercase; letter-spacing:.08em;
+    background:var(--accent-dim); color:var(--accent); margin-bottom:14px;
+    transition:all .3s ease;
+  }
+  .word-counter{ color:var(--text-faint); font-size:0.8rem; margin-bottom:2px; }
+  .word-display{
+    font-size:3.4rem; font-weight:800; letter-spacing:-0.02em; margin:6px 0 10px;
+    background:linear-gradient(135deg, #fff, #c9d2e8);
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+  }
+  .instruction{ min-height:1.5em; margin:0 0 26px; }
+
+  .record-zone{ position:relative; display:flex; flex-direction:column; align-items:center; gap:14px; }
+  .record-button{
+    position:relative; width:110px; height:110px; border-radius:50%;
+    border:none; cursor:pointer; background:#ffffff10; border:2px solid #ffffff26;
+    display:flex; align-items:center; justify-content:center;
+    transition:border-color .2s ease;
+  }
+  .record-button-inner{
+    width:44px; height:44px; border-radius:50%;
+    background:linear-gradient(135deg, var(--danger), #ef4444);
+    transition:all .25s cubic-bezier(.2,.9,.25,1);
+    box-shadow:0 0 0 0 #f8717166;
+  }
+  .record-button.recording .record-button-inner{
+    border-radius:10px; width:34px; height:34px;
+    animation:pulse-glow 1.1s ease-in-out infinite;
+  }
+  .record-button.countdown .record-button-inner{ opacity:.3; }
+  @keyframes pulse-glow{
+    0%,100%{ box-shadow:0 0 0 0 #f8717155; }
+    50%{ box-shadow:0 0 0 var(--glow, 14px) #f8717133; }
+  }
+  .record-status{ font-size:0.88rem; color:var(--text-dim); min-height:1.3em; }
+  .countdown-num{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    font-size:2.6rem; font-weight:800; color:var(--text); pointer-events:none;
+  }
+  .countdown-num[hidden]{ display:none; }
+
+  .playback-controls{ display:flex; gap:10px; margin-top:24px; flex-wrap:wrap; }
+  .playback-controls[hidden]{ display:none; }
+  .playback-controls button{ flex:1; min-width:110px; }
+
+  /* ---- done screen ---- */
+  .success-icon{
+    width:64px; height:64px; border-radius:50%; margin:0 auto 18px;
+    background:linear-gradient(135deg, var(--success), #10b981);
+    display:flex; align-items:center; justify-content:center; font-size:1.8rem; color:#06281c;
+    animation:pop .5s cubic-bezier(.2,.9,.25,1) both;
+  }
+  @keyframes pop{ 0%{transform:scale(0);} 70%{transform:scale(1.15);} 100%{transform:scale(1);} }
+  #screen-done .card{ text-align:center; }
+
+  .toast{
+    position:fixed; left:50%; bottom:28px; transform:translateX(-50%);
+    background:#1c2233; border:1px solid #ffffff22; color:var(--text);
+    padding:12px 20px; border-radius:12px; font-size:0.88rem; box-shadow:0 10px 30px -10px #000000aa;
+    animation:toast-in .25s ease both;
+  }
+  .toast.error{ border-color:#f8717166; color:#fecaca; }
+  @keyframes toast-in{ from{opacity:0; transform:translate(-50%, 10px);} to{opacity:1; transform:translate(-50%,0);} }

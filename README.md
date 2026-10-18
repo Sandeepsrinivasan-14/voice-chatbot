@@ -13,7 +13,12 @@ passed downstream as a confident mistranscription.
 ![Types: mypy](https://img.shields.io/badge/types-mypy-1f5082)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
-![Browser chat interface](docs/img/chat-ui.png)
+<p align="center">
+  <img src="docs/img/chat-ui.png" alt="Browser chat interface: a glass voice panel with the animated orb and live waveform beside the conversation" width="100%">
+</p>
+<p align="center">
+  <img src="docs/img/chat-ui-mobile.png" alt="The same interface in the light theme on a phone" width="260">
+</p>
 
 ## Background
 
@@ -255,6 +260,7 @@ accumulated feedback events into a versioned, reproducible dataset:
 
 ```python
 from learning import dataset_builder
+
 manifest = dataset_builder.build_dataset("data/learning/feedback.db", "data/learning/datasets")
 ```
 
@@ -370,9 +376,9 @@ pip install -r requirements.txt         # CPU
 # pip install -r requirements-gpu.txt   # GPU: CUDA 12.x, ~1.3 GB of wheels
 ```
 
-`requirements.txt` uses lower-bound pins. To reproduce a known-good
-environment exactly, use [`requirements-frozen.txt`](requirements-frozen.txt)
-instead (fully resolved versions from a working CPU install).
+`requirements.txt` uses lower-bound pins; Dependabot proposes bumps weekly and CI
+verifies them. To capture an exact environment for your own machine, run
+`pip freeze > my-lock.txt` after installing.
 
 English and Hindi need no extra Python packages, but the Piper voice files
 (`.onnx` + `.onnx.json`) are large binaries that are **not** committed: download
@@ -448,37 +454,66 @@ copy `.env.example` to `.env` and edit it. Nothing in `.env` is required to run.
 python src/chat_web.py       # then open http://localhost:5006
 ```
 
-Streaming responses, a per-message confidence indicator, multi-turn history, and
-playback of the synthesized reply. To serve it through Waitress instead of
-Flask's development server:
+The server binds to `127.0.0.1` only (`WEB_HOST`). To serve it through Waitress
+instead of Flask's development server:
 
 ```powershell
 $env:PRODUCTION = 1; python src/chat_web.py
 ```
 
+The interface is plain HTML, CSS and ES modules under [`src/web_chat/`](src/web_chat/) --
+no build step, no bundler, no CDN and no vendored third-party library, so it
+works with the network unplugged:
+
+- **Voice stage.** A WebGL orb (a single fragment shader, lazy-loaded after
+  first paint) that reacts to the live microphone level while you talk and to
+  the actual audio being played while the assistant speaks, with a distinct
+  look for idle, listening, thinking and speaking. If WebGL is unavailable a
+  CSS orb takes over. A live waveform and scrolling spectrogram sit below it.
+- **Glass conversation panel.** Streaming message bubbles, per-message
+  Replay / Stop / Copy, confidence under voice messages, and the inline
+  transcript-correction form when continuous learning is on.
+- **Push-to-talk and tap-to-talk.** Hold the mic button (or `Space`) and release
+  to send; a quick tap instead records until you pause or tap again.
+- **Settings drawer.** Language (auto, English, Hindi, Tamil), spoken replies
+  on/off, speaking speed and volume, microphone sensitivity, pause length,
+  theme (system / dark / light), motion (auto / reduced / full) and whether to
+  show confidence scores. Saved in the browser's `localStorage`.
+- **Transcript export** as Markdown, plain text or JSON, or copy to clipboard.
+  Built in the browser; nothing is uploaded.
+- **Accessibility.** The transcript is an `aria-live` log (held back while a
+  reply streams, so a screen reader reads the finished reply once), state
+  changes are announced, every control is keyboard-reachable with visible
+  focus, text meets WCAG AA contrast in both themes, and `prefers-reduced-motion`
+  (or the motion setting) stops the background drift, ripples and orb animation.
+- **Responsive.** Two columns on desktop, a compact stacked layout on phones.
+
+Keyboard shortcuts (press `?` in the app for the list): `Space` hold to talk,
+`M` start/stop recording, `H` hands-free, `W` wake word, `V` spoken replies,
+`Esc` stop speaking or cancel recording, `/` focus the message box, `N` new
+conversation, `E` export, `S` settings, `T` theme.
+
 #### Conversational controls
 
-Everything below is client-side JavaScript in [`src/web_chat/index.html`](src/web_chat/index.html) --
-no backend changes, no new dependencies, and each one degrades independently
-(turning one off never breaks another):
+Everything below runs in the browser against the same backend API; each one
+degrades independently (turning one off never breaks another):
 
 - **Auto-stop on silence.** Recording stops on its own roughly 0.8s after you
-  stop talking (a simple RMS-energy check via the Web Audio API, not a
-  webrtcvad port -- see the code comments for why). Manual tap-to-stop still
-  works as a fallback at all times.
-- **Barge-in.** Tapping the mic or typing a message always cuts the
-  assistant's current speech off immediately, mirroring how ChatGPT/Claude
-  voice let you talk over them. Every reply also gets an explicit "Stop"
-  button next to "Replay".
-- **Hands-free mode** (🔁 toggle). After each reply finishes speaking, the
-  mic reopens automatically -- no tapping between turns. Off by default.
-- **Wake word** (👂 toggle). Say "hey chatbot" to start listening from idle,
-  like "Hey Siri"/"Hey Google" -- but implemented by reusing the local
-  Whisper model already running (no third-party wake-word engine, no
-  account/API key, fully offline), so background speech gets a brief local
-  transcription check and is discarded unless it matches. Off by default;
-  turning it on requests microphone access immediately, and a toast explains
-  what's happening the first time.
+  stop talking (a simple RMS-energy check via the Web Audio API with an
+  adaptive noise floor, not a webrtcvad port -- see
+  [`recorder.js`](src/web_chat/js/recorder.js) for why). The pause length and
+  sensitivity are in the settings drawer.
+- **Barge-in.** Pressing the mic or sending a message cuts the assistant's
+  current speech off immediately, and cancels the in-flight reply and
+  speech-synthesis requests so an interrupted answer stops using the GPU.
+- **Hands-free mode.** After each reply finishes speaking, the mic reopens
+  automatically -- no tapping between turns. Off by default.
+- **Wake word.** Say "hey chatbot" to start listening from idle, like "Hey
+  Siri" -- implemented by reusing the local Whisper model already running (no
+  third-party wake-word engine, no account/API key, fully offline), so
+  background speech gets a brief local transcription check and is discarded
+  unless it matches. Off by default; turning it on requests microphone access
+  immediately.
 
 None of these require the continuous-learning layer below -- they work
 identically whether `LEARNING_ENABLED` is on or off.
@@ -510,13 +545,13 @@ Always publish the port to `127.0.0.1` -- the app has no authentication; see
 pip install -r requirements-dev.txt
 ruff check .     # lint
 mypy             # type check src/
-pytest           # ~180 tests; the GPU, Ollama, and the microphone are all mocked
+pytest           # ~220 tests; the GPU, Ollama, and the microphone are all mocked
 ```
 
 CI ([`.github/workflows/tests.yml`](.github/workflows/tests.yml)) runs lint and
 type checking, then the suite on Python 3.11 and 3.12 (Ubuntu) plus 3.11 on
 Windows, and verifies that the Docker image builds and serves `/api/health`.
-Tests that need a GPU, large models, or real services are marked `gpu`, `slow`
+The front-end logic tests (`tests/test_frontend_logic.py`) use Node when it is installed and skip otherwise. Tests that need a GPU, large models, or real services are marked `gpu`, `slow`
 or `integration`; `gpu` tests skip themselves when no CUDA device is present.
 `pre-commit install` runs lint and type checks locally before each commit. See
 [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md)
@@ -570,8 +605,9 @@ src/
   confidence_check.py  log-probability gate and CSV audit log
   config.py            frozen Config dataclass, .env support
   cuda_dlls.py         Windows CUDA DLL path fix
-  chat_web.py          browser chat UI (web_chat/)
-  record_web.py        dataset recorder UI (web_recorder/)
+  chat_web.py          browser chat UI server (web_chat/: index.html, css/, js/ ES modules)
+  record_web.py        dataset recorder UI server (web_recorder/)
+  web_common.py        shared Flask setup: JSON errors, static files, CSP and security headers
   browser_audio.py     decodes browser MediaRecorder audio (webm/ogg) to float32 PCM via PyAV
   cli.py               terminal interface with live VAD
   benchmark.py         raw-vs-preprocessed accuracy benchmark
@@ -588,7 +624,7 @@ src/
     evaluation.py             WER computation, baseline-vs-candidate comparison
     model_registry.py          trained-model versioning, promotion gating, rollback
     training.py                 LoRA/PEFT fine-tuning entry point (needs requirements-training.txt)
-tests/                 ~180 pytest tests, fully mocked
+tests/                 ~220 pytest tests, fully mocked (incl. front-end asset/CSP checks)
 docs/                  specification (PDF + HTML sources) and REQUIREMENTS.md
 Dockerfile             CPU image for the browser UI
 .github/               CI workflow (lint, mypy, test matrix, docker) and Dependabot

@@ -1,0 +1,181 @@
+/* ==========================================================================
+   Design tokens, themes, and the animated mesh background.
+   No external fonts or images: the app is fully offline.
+   ========================================================================== */
+
+/* Registered so the phase colours can transition smoothly (idle -> listening
+   -> thinking -> speaking) instead of snapping. */
+@property --p1 { syntax: "<color>"; inherits: true; initial-value: #6366f1; }
+@property --p2 { syntax: "<color>"; inherits: true; initial-value: #a855f7; }
+@property --p3 { syntax: "<color>"; inherits: true; initial-value: #38bdf8; }
+@property --lvl { syntax: "<number>"; inherits: true; initial-value: 0; }
+
+:root {
+  color-scheme: dark;
+
+  --font-sans: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "SF Pro Text",
+    Roboto, "Helvetica Neue", "Noto Sans", "Noto Sans Devanagari", "Noto Sans Tamil", Arial, sans-serif;
+  --font-display: "Segoe UI Variable Display", "Segoe UI", system-ui, -apple-system, "SF Pro Display",
+    Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, "Liberation Mono", monospace;
+
+  --r-sm: 10px;
+  --r-md: 16px;
+  --r-lg: 26px;
+  --r-pill: 999px;
+
+  --ease-out: cubic-bezier(0.2, 0.9, 0.25, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.5, 1);
+
+  /* ---- dark theme (default) ---- */
+  --bg: #07081a;
+  --text: #eef0ff;
+  --text-dim: #b4b9d6;
+  --text-faint: #98a0c4;
+  --accent: #8b93ff;
+  --accent-strong: #5b5ff0;
+  --focus: #9ec5ff;
+
+  --glass: rgb(20 22 48 / 0.52);
+  --glass-strong: rgb(16 18 40 / 0.78);
+  --glass-hover: rgb(255 255 255 / 0.09);
+  --glass-fill: rgb(255 255 255 / 0.06);
+  --edge-1: rgb(255 255 255 / 0.34);
+  --edge-2: rgb(139 147 255 / 0.4);
+  --hairline: rgb(255 255 255 / 0.1);
+  --shadow: 0 30px 80px -30px rgb(0 0 0 / 0.75), 0 8px 24px -12px rgb(0 0 0 / 0.5);
+
+  --bubble-user-1: #4f46e5;
+  --bubble-user-2: #7c3aed;
+  --bubble-user-text: #ffffff;
+  --bubble-bot: rgb(255 255 255 / 0.07);
+  --bubble-bot-text: var(--text);
+
+  --danger: #ff8a8a;
+  --danger-strong: #dc2626;
+  --success: #4ade80;
+  --warn: #fbbf24;
+
+  --btn-grad-1: #4f46e5;
+  --btn-grad-2: #7c3aed;
+  --btn-text: #ffffff;
+
+  --blob-a: rgb(99 102 241 / 0.55);
+  --blob-b: rgb(168 85 247 / 0.45);
+  --blob-c: rgb(56 189 248 / 0.38);
+  --blob-d: rgb(244 114 182 / 0.3);
+  --grain-opacity: 0.07;
+  --orb-halo: 1;
+
+  --p1: #6366f1;
+  --p2: #a855f7;
+  --p3: #38bdf8;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #eceffd;
+  --text: #14173a;
+  --text-dim: #3f4570;
+  --text-faint: #565d86;
+  --accent: #4338ca;
+  --accent-strong: #4338ca;
+  --focus: #1d4ed8;
+
+  --glass: rgb(255 255 255 / 0.55);
+  --glass-strong: rgb(255 255 255 / 0.82);
+  --glass-hover: rgb(67 56 202 / 0.09);
+  --glass-fill: rgb(67 56 202 / 0.06);
+  --edge-1: rgb(255 255 255 / 0.95);
+  --edge-2: rgb(99 102 241 / 0.4);
+  --hairline: rgb(30 27 90 / 0.13);
+  --shadow: 0 30px 70px -30px rgb(60 60 140 / 0.38), 0 8px 24px -14px rgb(60 60 140 / 0.3);
+
+  --bubble-bot: rgb(255 255 255 / 0.72);
+  --danger: #b91c1c;
+  --success: #166534;
+  --warn: #b45309;
+
+  --blob-a: rgb(129 140 248 / 0.6);
+  --blob-b: rgb(192 132 252 / 0.5);
+  --blob-c: rgb(125 211 252 / 0.6);
+  --blob-d: rgb(249 168 212 / 0.5);
+  --grain-opacity: 0.05;
+  --orb-halo: 0.55;
+}
+
+/* Phase colours drive the mesh, the CSS orb fallback and the mic ring. The
+   WebGL orb keeps its own (matching) palette in js/orb.js. */
+:root[data-phase="idle"] { --p1: #6366f1; --p2: #a855f7; --p3: #38bdf8; }
+:root[data-phase="listening"] { --p1: #06b6d4; --p2: #10b981; --p3: #67e8f9; }
+:root[data-phase="thinking"] { --p1: #8b5cf6; --p2: #f59e0b; --p3: #fcd34d; }
+:root[data-phase="speaking"] { --p1: #ec4899; --p2: #6366f1; --p3: #f9a8d4; }
+
+:root {
+  transition: --p1 0.9s ease, --p2 0.9s ease, --p3 0.9s ease;
+}
+
+/* ---- animated mesh background ---------------------------------------- */
+.mesh {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background:
+    radial-gradient(120% 90% at 50% -10%, color-mix(in srgb, var(--p1) 14%, transparent), transparent 60%),
+    var(--bg);
+}
+
+.mesh .blob {
+  position: absolute;
+  width: 62vmax;
+  height: 62vmax;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.85;
+  will-change: transform;
+  transition: background-color 1.2s ease;
+}
+
+.mesh .blob-a { top: -22vmax; left: -14vmax; background: radial-gradient(circle, var(--blob-a), transparent 68%); animation: drift-a 26s ease-in-out infinite alternate; }
+.mesh .blob-b { top: 8vmax; right: -24vmax; background: radial-gradient(circle, var(--blob-b), transparent 68%); animation: drift-b 32s ease-in-out infinite alternate; }
+.mesh .blob-c { bottom: -30vmax; left: 6vmax; background: radial-gradient(circle, var(--blob-c), transparent 68%); animation: drift-c 38s ease-in-out infinite alternate; }
+.mesh .blob-d { bottom: -18vmax; right: 8vmax; width: 44vmax; height: 44vmax; background: radial-gradient(circle, var(--blob-d), transparent 68%); animation: drift-d 29s ease-in-out infinite alternate; }
+
+/* A faint tint that follows the conversation phase. */
+.mesh .tint {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(60% 55% at 28% 42%, color-mix(in srgb, var(--p1) calc(10% + var(--lvl) * 22%), transparent), transparent 70%);
+  mix-blend-mode: screen;
+  transition: opacity 0.6s ease;
+}
+
+:root[data-theme="light"] .mesh .tint { mix-blend-mode: multiply; opacity: 0.55; }
+
+.mesh .grain {
+  position: absolute;
+  inset: 0;
+  opacity: var(--grain-opacity);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 .9 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  mix-blend-mode: overlay;
+}
+
+@keyframes drift-a { from { transform: translate3d(0, 0, 0) scale(1); } to { transform: translate3d(14vmax, 10vmax, 0) scale(1.18); } }
+@keyframes drift-b { from { transform: translate3d(0, 0, 0) scale(1.1); } to { transform: translate3d(-16vmax, 12vmax, 0) scale(0.92); } }
+@keyframes drift-c { from { transform: translate3d(0, 0, 0) scale(0.95); } to { transform: translate3d(18vmax, -12vmax, 0) scale(1.2); } }
+@keyframes drift-d { from { transform: translate3d(0, 0, 0) scale(1); } to { transform: translate3d(-12vmax, -14vmax, 0) scale(1.25); } }
+
+/* Reduced motion: the mesh stays as a still, softly blurred gradient. */
+:root[data-motion="reduced"] .mesh .blob { animation: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion="full"]) .mesh .blob { animation: none; }
+}
+
+@media (max-width: 720px) {
+  /* Big blurs are the most expensive thing on low-end phones. */
+  .mesh .blob { filter: blur(56px); }
+}

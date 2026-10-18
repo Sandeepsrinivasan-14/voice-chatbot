@@ -72,14 +72,20 @@ def _result(label, examples):
 
 class TestCompareModels:
     def test_recommends_promote_on_clear_improvement(self):
-        baseline = _result("base", [
-            evaluation.ExampleResult("a", "hello world", "hullo world", 0.5),
-            evaluation.ExampleResult("b", "good morning", "good mornin", 0.5),
-        ])
-        candidate = _result("cand", [
-            evaluation.ExampleResult("a", "hello world", "hello world", 0.0),
-            evaluation.ExampleResult("b", "good morning", "good morning", 0.0),
-        ])
+        baseline = _result(
+            "base",
+            [
+                evaluation.ExampleResult("a", "hello world", "hullo world", 0.5),
+                evaluation.ExampleResult("b", "good morning", "good mornin", 0.5),
+            ],
+        )
+        candidate = _result(
+            "cand",
+            [
+                evaluation.ExampleResult("a", "hello world", "hello world", 0.0),
+                evaluation.ExampleResult("b", "good morning", "good morning", 0.0),
+            ],
+        )
         comparison = evaluation.compare_models(baseline, candidate, min_relative_improvement=0.05)
         assert comparison.recommendation == "promote"
         assert comparison.relative_improvement == 1.0
@@ -91,16 +97,22 @@ class TestCompareModels:
         assert comparison.recommendation == "reject"
 
     def test_rejects_on_one_bad_regression_even_if_average_improves(self):
-        baseline = _result("base", [
-            evaluation.ExampleResult("a", "x", "x", 0.8),
-            evaluation.ExampleResult("b", "y", "y", 0.8),
-            evaluation.ExampleResult("c", "z", "z", 0.0),
-        ])
-        candidate = _result("cand", [
-            evaluation.ExampleResult("a", "x", "x", 0.0),  # much better
-            evaluation.ExampleResult("b", "y", "y", 0.0),  # much better
-            evaluation.ExampleResult("c", "z", "z", 0.9),  # badly regressed
-        ])
+        baseline = _result(
+            "base",
+            [
+                evaluation.ExampleResult("a", "x", "x", 0.8),
+                evaluation.ExampleResult("b", "y", "y", 0.8),
+                evaluation.ExampleResult("c", "z", "z", 0.0),
+            ],
+        )
+        candidate = _result(
+            "cand",
+            [
+                evaluation.ExampleResult("a", "x", "x", 0.0),  # much better
+                evaluation.ExampleResult("b", "y", "y", 0.0),  # much better
+                evaluation.ExampleResult("c", "z", "z", 0.9),  # badly regressed
+            ],
+        )
         # Average clearly improves (0.533 -> 0.3), but example "c" regressed
         # by 0.9, well past max_per_example_regression -- must still reject.
         comparison = evaluation.compare_models(

@@ -76,9 +76,9 @@ def _env_int(name: str, default: int) -> int:
 @dataclass(frozen=True)
 class Config:
     # --- audio / capture (pipeline.py's live mic loop) ---
-    sample_rate: int = 16000            # required by both webrtcvad and whisper
+    sample_rate: int = 16000  # required by both webrtcvad and whisper
     frame_ms: int = 30
-    vad_aggressiveness: int = 2         # 0 (permissive) .. 3 (strict)
+    vad_aggressiveness: int = 2  # 0 (permissive) .. 3 (strict)
     max_record_seconds: int = 15
 
     # --- STT (faster-whisper) ---
@@ -88,8 +88,8 @@ class Config:
     whisper_model_size: str = "small"
     whisper_compute_type_gpu: str = "int8_float16"
     whisper_compute_type_cpu: str = "int8"
-    beam_size_fast: int = 1             # first-pass greedy-ish decode, fast
-    beam_size_retry: int = 5            # wider search, only on low confidence
+    beam_size_fast: int = 1  # first-pass greedy-ish decode, fast
+    beam_size_retry: int = 5  # wider search, only on low confidence
     # "auto" lets faster-whisper detect the spoken language per utterance
     # (needed for Hindi/Tamil support); set to "en"/"hi"/"ta" to force one
     # instead of relying on detection (useful for short/ambiguous clips).
@@ -115,8 +115,8 @@ class Config:
     # existed between Whisper STT and the old Tamil-only model's TTS/LLM
     # calls, since there's now only one model to keep resident.
     ollama_model: str = "gemma3n:e2b"
-    ollama_timeout_s: int = 180          # covers Ollama's one-time cold-load
-    ollama_max_retries: int = 2          # retries on transient connection errors
+    ollama_timeout_s: int = 180  # covers Ollama's one-time cold-load
+    ollama_max_retries: int = 2  # retries on transient connection errors
     # Tamil-specific model override -- empty string means "no override, use
     # ollama_model for Tamil too". Left in place (rather than removed) in
     # case a future language needs this same escape hatch again.
@@ -167,7 +167,7 @@ class Config:
     chat_web_port: int = 5006
     record_web_port: int = 5005
     max_upload_bytes: int = 25 * 1024 * 1024  # 25MB cap on browser audio uploads
-    production: bool = False             # PRODUCTION=1 -> serve via waitress
+    production: bool = False  # PRODUCTION=1 -> serve via waitress
 
     # --- continuous learning: STT correction feedback (src/learning/) ---
     # Master switch; everything below is inert while this is False, and
@@ -263,9 +263,7 @@ class Config:
             sample_rate=_env_int("SAMPLE_RATE", defaults.sample_rate),
             whisper_model_size=os.environ.get("WHISPER_MODEL_SIZE", defaults.whisper_model_size),
             confidence_threshold=_env_float("CONFIDENCE_THRESHOLD", defaults.confidence_threshold),
-            confidence_log_path=os.environ.get(
-                "CONFIDENCE_LOG_PATH", defaults.confidence_log_path
-            ),
+            confidence_log_path=os.environ.get("CONFIDENCE_LOG_PATH", defaults.confidence_log_path),
             whisper_language=os.environ.get("WHISPER_LANGUAGE", defaults.whisper_language),
             ollama_url=os.environ.get("OLLAMA_URL", defaults.ollama_url),
             ollama_model=os.environ.get("OLLAMA_MODEL", defaults.ollama_model),
@@ -275,9 +273,7 @@ class Config:
             ),
             piper_executable=os.environ.get("PIPER_EXECUTABLE", _default_piper_executable()),
             piper_model_path=os.environ.get("PIPER_MODEL_PATH", defaults.piper_model_path),
-            piper_model_path_hi=os.environ.get(
-                "PIPER_MODEL_PATH_HI", defaults.piper_model_path_hi
-            ),
+            piper_model_path_hi=os.environ.get("PIPER_MODEL_PATH_HI", defaults.piper_model_path_hi),
             tamil_tts_enabled=_env_bool("TAMIL_TTS_ENABLED", defaults.tamil_tts_enabled),
             log_dir=os.environ.get("LOG_DIR", defaults.log_dir),
             web_host=os.environ.get("WEB_HOST", defaults.web_host).strip() or defaults.web_host,

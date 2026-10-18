@@ -36,9 +36,13 @@ def _write_wav(path, seconds=0.5, sample_rate=16000) -> str:
 def _seed_event(db_path, tmp_path, *, n=0, language="en"):
     audio_ref = _write_wav(tmp_path / f"event_{n}.wav")
     return feedback_store.insert_feedback_event(
-        db_path, profile_id="alice", session_id="s1",
-        original_text=f"text {n} four", corrected_text=f"text {n} for",
-        audio_ref=audio_ref, language=language,
+        db_path,
+        profile_id="alice",
+        session_id="s1",
+        original_text=f"text {n} four",
+        corrected_text=f"text {n} for",
+        audio_ref=audio_ref,
+        language=language,
     )
 
 
@@ -69,8 +73,10 @@ class TestNotEnoughData:
         result = scheduler.run_training_cycle(config)
 
         assert result == {
-            "ran": True, "reason": "not_enough_data",
-            "new_event_count": 2, "required": 3,
+            "ran": True,
+            "reason": "not_enough_data",
+            "new_event_count": 2,
+            "required": 3,
         }
 
     def test_disabled_flags_are_a_pure_noop(self, tmp_path):
@@ -171,9 +177,7 @@ class TestTrainingAndPromotion:
             return _transcribe
 
         monkeypatch.setattr(training_module, "train", fake_train)
-        monkeypatch.setattr(
-            training_module, "_load_ct2_transcribe_fn", fake_load_ct2_transcribe_fn
-        )
+        monkeypatch.setattr(training_module, "_load_ct2_transcribe_fn", fake_load_ct2_transcribe_fn)
         return ct2_dir
 
     def test_promotes_and_invokes_reload_callback_when_candidate_is_better(
@@ -192,9 +196,13 @@ class TestTrainingAndPromotion:
 
         def fake_compare_models(baseline, candidate, *, min_relative_improvement=0.05, **kw):
             return evaluation_module.ComparisonResult(
-                baseline_label=baseline.model_label, candidate_label=candidate.model_label,
-                baseline_wer=0.5, candidate_wer=0.1, relative_improvement=0.8,
-                regression_examples=[], meets_improvement_threshold=True,
+                baseline_label=baseline.model_label,
+                candidate_label=candidate.model_label,
+                baseline_wer=0.5,
+                candidate_wer=0.1,
+                relative_improvement=0.8,
+                regression_examples=[],
+                meets_improvement_threshold=True,
                 recommendation="promote",
             )
 
@@ -216,9 +224,7 @@ class TestTrainingAndPromotion:
         assert state["last_successful_training_at"] is not None
         assert state["last_trained_event_id"] > 0
 
-    def test_does_not_promote_or_reload_when_candidate_is_not_better(
-        self, tmp_path, monkeypatch
-    ):
+    def test_does_not_promote_or_reload_when_candidate_is_not_better(self, tmp_path, monkeypatch):
         config = _make_config(tmp_path)
         self._seed_enough_events(config, tmp_path)
         self._patch_training(monkeypatch, tmp_path, wer_improves=False)
@@ -227,9 +233,13 @@ class TestTrainingAndPromotion:
 
         def fake_compare_models(baseline, candidate, *, min_relative_improvement=0.05, **kw):
             return evaluation_module.ComparisonResult(
-                baseline_label=baseline.model_label, candidate_label=candidate.model_label,
-                baseline_wer=0.2, candidate_wer=0.3, relative_improvement=-0.5,
-                regression_examples=[], meets_improvement_threshold=False,
+                baseline_label=baseline.model_label,
+                candidate_label=candidate.model_label,
+                baseline_wer=0.2,
+                candidate_wer=0.3,
+                relative_improvement=-0.5,
+                regression_examples=[],
+                meets_improvement_threshold=False,
                 recommendation="reject",
             )
 
@@ -260,9 +270,13 @@ class TestTrainingAndPromotion:
 
         def fake_compare_models(baseline, candidate, *, min_relative_improvement=0.05, **kw):
             return evaluation_module.ComparisonResult(
-                baseline_label=baseline.model_label, candidate_label=candidate.model_label,
-                baseline_wer=0.5, candidate_wer=0.1, relative_improvement=0.8,
-                regression_examples=[], meets_improvement_threshold=True,
+                baseline_label=baseline.model_label,
+                candidate_label=candidate.model_label,
+                baseline_wer=0.5,
+                candidate_wer=0.1,
+                relative_improvement=0.8,
+                regression_examples=[],
+                meets_improvement_threshold=True,
                 recommendation="promote",
             )
 

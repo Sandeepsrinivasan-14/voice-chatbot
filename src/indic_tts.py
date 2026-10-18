@@ -90,9 +90,7 @@ def _ensure_dependencies_installed() -> None:
         "[indic_tts] Tamil TTS dependencies not found -- installing "
         f"{_REQUIREMENTS_FILE} now (one-time, ~1GB of packages)..."
     )
-    subprocess.run(
-        [sys.executable, "-m", "pip", "install", "-r", _REQUIREMENTS_FILE], check=True
-    )
+    subprocess.run([sys.executable, "-m", "pip", "install", "-r", _REQUIREMENTS_FILE], check=True)
     print("[indic_tts] Tamil TTS dependencies installed.")
     import importlib
 

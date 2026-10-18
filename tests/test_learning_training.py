@@ -33,7 +33,8 @@ class TestMissingDependencies:
 
         with pytest.raises(training.MissingTrainingDependencies):
             training.train(
-                str(tmp_path / "manifest.csv"), str(tmp_path / "out"),
+                str(tmp_path / "manifest.csv"),
+                str(tmp_path / "out"),
                 config=training.TrainingConfig(),
             )
 

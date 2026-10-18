@@ -24,16 +24,26 @@ def _write_wav(path, seconds=0.5, sample_rate=16000) -> str:
 
 
 def _seed_event(
-    db_path, tmp_path, *, profile_id="alice", original="four", corrected="for",
-    with_audio=True, language="en",
+    db_path,
+    tmp_path,
+    *,
+    profile_id="alice",
+    original="four",
+    corrected="for",
+    with_audio=True,
+    language="en",
 ):
     audio_ref = None
     if with_audio:
         audio_ref = _write_wav(tmp_path / f"{original}_{corrected}_{profile_id}_{language}.wav")
     return feedback_store.insert_feedback_event(
-        db_path, profile_id=profile_id, session_id="s1",
-        original_text=f"I said {original}", corrected_text=f"I said {corrected}",
-        audio_ref=audio_ref, language=language,
+        db_path,
+        profile_id=profile_id,
+        session_id="s1",
+        original_text=f"I said {original}",
+        corrected_text=f"I said {corrected}",
+        audio_ref=audio_ref,
+        language=language,
     )
 
 

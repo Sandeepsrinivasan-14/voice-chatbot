@@ -75,13 +75,13 @@ logger = logging.getLogger("voice_chatbot.preprocessing")
 # normalize toward. They were chosen from typical adult speech statistics,
 # not from any one voice -- re-tune PITCH_* if a much higher/lower-pitched
 # speaker's normal register is being flagged as an outlier.
-TARGET_RMS = 0.1                 # target RMS amplitude after normalization
-PITCH_MIN_HZ = 80.0               # below this -> flagged as pitch outlier
-PITCH_MAX_HZ = 400.0              # above this -> flagged as pitch outlier
-PITCH_REFERENCE_HZ = 165.0        # rough neutral midpoint we correct toward
-NORMAL_SPEECH_RATE = 3.5          # syllables/sec-ish proxy, see estimate below
-SPEED_RATIO_LOW = 0.75            # below this fraction of normal -> "slow"
-SPEED_RATIO_HIGH = 1.35           # above this fraction of normal -> "fast"
+TARGET_RMS = 0.1  # target RMS amplitude after normalization
+PITCH_MIN_HZ = 80.0  # below this -> flagged as pitch outlier
+PITCH_MAX_HZ = 400.0  # above this -> flagged as pitch outlier
+PITCH_REFERENCE_HZ = 165.0  # rough neutral midpoint we correct toward
+NORMAL_SPEECH_RATE = 3.5  # syllables/sec-ish proxy, see estimate below
+SPEED_RATIO_LOW = 0.75  # below this fraction of normal -> "slow"
+SPEED_RATIO_HIGH = 1.35  # above this fraction of normal -> "fast"
 
 # Both default to False -- see the module docstring's "UPDATE, post-benchmark"
 # section. Detection/logging always runs regardless of these flags; only the
@@ -148,8 +148,8 @@ def _detect_and_correct_pitch(
     try:
         f0, voiced_flag, _ = librosa.pyin(
             audio,
-            fmin=float(librosa.note_to_hz("C2")),   # ~65 Hz
-            fmax=float(librosa.note_to_hz("C6")),   # ~1047 Hz
+            fmin=float(librosa.note_to_hz("C2")),  # ~65 Hz
+            fmax=float(librosa.note_to_hz("C6")),  # ~1047 Hz
             sr=sr,
         )
         voiced_f0 = f0[voiced_flag] if f0 is not None else np.array([])
@@ -213,11 +213,7 @@ def _detect_and_correct_speed(
         onsets = librosa.onset.onset_detect(onset_envelope=onset_env, sr=sr)
         syllable_proxy_rate = len(onsets) / duration_s if duration_s > 0 else 0.0
 
-        ratio = (
-            syllable_proxy_rate / NORMAL_SPEECH_RATE
-            if syllable_proxy_rate > 0
-            else 1.0
-        )
+        ratio = syllable_proxy_rate / NORMAL_SPEECH_RATE if syllable_proxy_rate > 0 else 1.0
         report.estimated_speed_ratio = float(ratio)
 
         if ratio < SPEED_RATIO_LOW:

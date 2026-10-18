@@ -34,8 +34,14 @@ from datetime import datetime, timezone
 from . import feedback_store
 
 MANIFEST_FIELDS = [
-    "event_uuid", "split", "audio_path", "text", "original_text",
-    "profile_id", "stt_confidence", "created_at",
+    "event_uuid",
+    "split",
+    "audio_path",
+    "text",
+    "original_text",
+    "profile_id",
+    "stt_confidence",
+    "created_at",
 ]
 
 
@@ -69,7 +75,8 @@ class DatasetManifest:
 def _next_version(output_root: str) -> str:
     os.makedirs(output_root, exist_ok=True)
     existing = [
-        d for d in os.listdir(output_root)
+        d
+        for d in os.listdir(output_root)
         if re.fullmatch(r"v(\d+)", d) and os.path.isdir(os.path.join(output_root, d))
     ]
     numbers = [int(d[1:]) for d in existing]
@@ -242,7 +249,8 @@ def list_dataset_versions(output_root: str) -> list[str]:
     if not os.path.isdir(output_root):
         return []
     versions = [
-        d for d in os.listdir(output_root)
+        d
+        for d in os.listdir(output_root)
         if re.fullmatch(r"v\d+", d) and os.path.isdir(os.path.join(output_root, d))
     ]
     return sorted(versions, key=lambda v: int(v[1:]))

@@ -73,7 +73,7 @@ _DEFAULT_STATE = {
     "last_successful_training_at": None,  # last time a candidate was PROMOTED
     "last_attempted_training_at": None,  # last time train() actually ran (promoted or not)
     "last_trained_event_id": 0,  # watermark: events with id <= this were already
-                                   # considered for a training attempt
+    # considered for a training attempt
     "last_result": None,  # human-readable summary of the most recent cycle
     "last_error": None,
     "consecutive_failures": 0,
@@ -154,7 +154,8 @@ class _TrainingLock:
             return False
         logger.warning(
             "Reclaiming stale training lock %s (older than %ss).",
-            self.lock_path, self.stale_after_s,
+            self.lock_path,
+            self.stale_after_s,
         )
         try:
             os.remove(self.lock_path)
@@ -245,7 +246,8 @@ def _do_training_cycle(config, state: dict, *, on_promoted) -> dict:
     if new_count < config.learning_min_new_events_for_training:
         logger.info(
             "Not enough new corrected data yet (%d new, need %d); skipping this cycle.",
-            new_count, config.learning_min_new_events_for_training,
+            new_count,
+            config.learning_min_new_events_for_training,
         )
         return {
             "ran": True,
@@ -256,7 +258,8 @@ def _do_training_cycle(config, state: dict, *, on_promoted) -> dict:
 
     logger.info(
         "%d new corrected events (>= %d threshold); starting a training run.",
-        new_count, config.learning_min_new_events_for_training,
+        new_count,
+        config.learning_min_new_events_for_training,
     )
     state["last_attempted_training_at"] = _now_iso()
     # Recorded regardless of outcome: these specific events have now been
@@ -289,19 +292,25 @@ def _do_training_cycle(config, state: dict, *, on_promoted) -> dict:
         compute_type="int8",
     )
     baseline_result = evaluation.evaluate_model_on_dataset(
-        baseline_transcribe, manifest_rows,
+        baseline_transcribe,
+        manifest_rows,
         model_label=f"production ({config.learning_training_baseline_model})",
         dataset_version=manifest.version,
     )
     candidate_transcribe = training._load_ct2_transcribe_fn(
-        ct2_dir, device=config.learning_training_device, compute_type="int8",
+        ct2_dir,
+        device=config.learning_training_device,
+        compute_type="int8",
     )
     candidate_result = evaluation.evaluate_model_on_dataset(
-        candidate_transcribe, manifest_rows,
-        model_label=f"candidate ({version})", dataset_version=manifest.version,
+        candidate_transcribe,
+        manifest_rows,
+        model_label=f"candidate ({version})",
+        dataset_version=manifest.version,
     )
     comparison = evaluation.compare_models(
-        baseline_result, candidate_result,
+        baseline_result,
+        candidate_result,
         min_relative_improvement=config.learning_training_min_relative_improvement,
     )
     model_registry.record_evaluation(config.learning_registry_path, version, asdict(comparison))
@@ -319,7 +328,9 @@ def _do_training_cycle(config, state: dict, *, on_promoted) -> dict:
     if comparison.recommendation != "promote":
         logger.info(
             "Candidate %s not promoted (relative_improvement=%+.1%%, recommendation=%s).",
-            version, comparison.relative_improvement, comparison.recommendation,
+            version,
+            comparison.relative_improvement,
+            comparison.recommendation,
         )
         return result
 
@@ -328,7 +339,8 @@ def _do_training_cycle(config, state: dict, *, on_promoted) -> dict:
     result["promoted"] = True
     logger.info(
         "Candidate %s promoted to production (relative_improvement=%+.1%%).",
-        version, comparison.relative_improvement,
+        version,
+        comparison.relative_improvement,
     )
 
     if config.learning_auto_deploy_enabled and on_promoted is not None:
@@ -338,7 +350,8 @@ def _do_training_cycle(config, state: dict, *, on_promoted) -> dict:
             logger.exception(
                 "on_promoted callback failed after promoting %s; production model in the "
                 "registry is still %s, but the live process may not have picked it up yet.",
-                version, version,
+                version,
+                version,
             )
 
     return result

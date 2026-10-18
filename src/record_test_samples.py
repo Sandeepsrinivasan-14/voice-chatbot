@@ -43,9 +43,7 @@ def record_clip(seconds: float) -> np.ndarray:
         time.sleep(0.3)
         print(".", end="", flush=True)
     print(" GO!")
-    audio = sd.rec(
-        int(seconds * SAMPLE_RATE), samplerate=SAMPLE_RATE, channels=1, dtype="float32"
-    )
+    audio = sd.rec(int(seconds * SAMPLE_RATE), samplerate=SAMPLE_RATE, channels=1, dtype="float32")
     sd.wait()
     print("  done.")
     return audio.flatten()
@@ -74,8 +72,10 @@ def main():
     os.makedirs(OUT_DIR, exist_ok=True)
     manifest_rows = []
 
-    print(f"Recording {len(words)} words x {len(MODULATIONS)} modulations = "
-          f"{len(words) * len(MODULATIONS)} clips.\n")
+    print(
+        f"Recording {len(words)} words x {len(MODULATIONS)} modulations = "
+        f"{len(words) * len(MODULATIONS)} clips.\n"
+    )
 
     for word in words:
         for mod in MODULATIONS:
@@ -88,9 +88,7 @@ def main():
             filename = f"{word}_{mod}.wav"
             filepath = os.path.join(OUT_DIR, filename)
             sf.write(filepath, audio, SAMPLE_RATE)
-            manifest_rows.append(
-                {"filename": filename, "expected_word": word, "modulation": mod}
-            )
+            manifest_rows.append({"filename": filename, "expected_word": word, "modulation": mod})
             print(f"  Saved {filepath}")
 
     with open(MANIFEST_PATH, "w", newline="", encoding="utf-8") as f:

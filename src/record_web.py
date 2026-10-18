@@ -25,12 +25,17 @@ import os
 import sys
 
 import soundfile as sf
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from browser_audio import decode_browser_audio  # noqa: E402
 from config import CONFIG  # noqa: E402
-from web_common import register_error_handlers, run_app  # noqa: E402
+from web_common import (  # noqa: E402
+    register_error_handlers,
+    register_security_headers,
+    register_static_routes,
+    run_app,
+)
 
 SAMPLE_RATE = CONFIG.sample_rate
 DEFAULT_WORDS = ["yes", "no", "stop", "help", "start"]
@@ -45,6 +50,8 @@ MIN_CLIP_SECONDS = 0.3
 app = Flask(__name__, static_folder=None)
 app.config["MAX_CONTENT_LENGTH"] = CONFIG.max_upload_bytes
 register_error_handlers(app)
+register_security_headers(app)
+register_static_routes(app, STATIC_DIR)
 
 
 def load_manifest_rows() -> list[dict]:
@@ -62,23 +69,15 @@ def save_manifest_rows(rows: list[dict]) -> None:
         writer.writerows(rows)
 
 
-@app.route("/")
-def index():
-    return send_from_directory(STATIC_DIR, "index.html")
-
-
-@app.route("/<path:filename>")
-def static_files(filename):
-    return send_from_directory(STATIC_DIR, filename)
-
-
 @app.route("/api/plan")
 def plan():
     """The full (word, modulation) grid plus which combos already have a
     saved recording, so reloading the page resumes instead of restarting.
     """
     words_param = request.args.get("words")
-    word_list = [w.strip() for w in words_param.split(",") if w.strip()] if words_param else DEFAULT_WORDS
+    word_list = (
+        [w.strip() for w in words_param.split(",") if w.strip()] if words_param else DEFAULT_WORDS
+    )
     done = {(r["expected_word"], r["modulation"]) for r in load_manifest_rows()}
     combos = [
         {"word": w, "modulation": m, "done": [w, m] in [list(d) for d in done]}
@@ -113,13 +112,16 @@ def upload():
     sf.write(filepath, audio, SAMPLE_RATE)
 
     rows = [
-        r for r in load_manifest_rows()
+        r
+        for r in load_manifest_rows()
         if not (r["expected_word"] == word and r["modulation"] == modulation)
     ]
     rows.append({"filename": filename, "expected_word": word, "modulation": modulation})
     save_manifest_rows(rows)
 
-    return jsonify({"ok": True, "filename": filename, "duration_s": round(audio.size / SAMPLE_RATE, 2)})
+    return jsonify(
+        {"ok": True, "filename": filename, "duration_s": round(audio.size / SAMPLE_RATE, 2)}
+    )
 
 
 @app.route("/api/health")

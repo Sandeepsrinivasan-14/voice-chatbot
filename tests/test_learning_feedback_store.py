@@ -89,8 +89,11 @@ class TestImmutability:
     def test_direct_update_is_rejected_by_the_database(self, tmp_path):
         db_path = str(tmp_path / DB_NAME)
         feedback_store.insert_feedback_event(
-            db_path, profile_id="alice", session_id="s1",
-            original_text="hello world", corrected_text="hello word",
+            db_path,
+            profile_id="alice",
+            session_id="s1",
+            original_text="hello world",
+            corrected_text="hello word",
         )
         conn = sqlite3.connect(db_path)
         try:
@@ -106,8 +109,11 @@ class TestImmutability:
     def test_direct_delete_is_rejected_by_the_database(self, tmp_path):
         db_path = str(tmp_path / DB_NAME)
         feedback_store.insert_feedback_event(
-            db_path, profile_id="alice", session_id="s1",
-            original_text="hello world", corrected_text="hello word",
+            db_path,
+            profile_id="alice",
+            session_id="s1",
+            original_text="hello world",
+            corrected_text="hello word",
         )
         conn = sqlite3.connect(db_path)
         try:
@@ -129,12 +135,18 @@ class TestPerProfileIsolation:
     def test_query_scoped_to_profile_excludes_other_profiles(self, tmp_path):
         db_path = str(tmp_path / DB_NAME)
         feedback_store.insert_feedback_event(
-            db_path, profile_id="alice", session_id="s1",
-            original_text="four", corrected_text="for",
+            db_path,
+            profile_id="alice",
+            session_id="s1",
+            original_text="four",
+            corrected_text="for",
         )
         feedback_store.insert_feedback_event(
-            db_path, profile_id="bob", session_id="s2",
-            original_text="four", corrected_text="floor",
+            db_path,
+            profile_id="bob",
+            session_id="s2",
+            original_text="four",
+            corrected_text="floor",
         )
         alice_events = feedback_store.query_feedback_events(db_path, profile_id="alice")
         bob_events = feedback_store.query_feedback_events(db_path, profile_id="bob")
@@ -144,12 +156,18 @@ class TestPerProfileIsolation:
     def test_unscoped_query_returns_all_profiles(self, tmp_path):
         db_path = str(tmp_path / DB_NAME)
         feedback_store.insert_feedback_event(
-            db_path, profile_id="alice", session_id="s1",
-            original_text="four", corrected_text="for",
+            db_path,
+            profile_id="alice",
+            session_id="s1",
+            original_text="four",
+            corrected_text="for",
         )
         feedback_store.insert_feedback_event(
-            db_path, profile_id="bob", session_id="s2",
-            original_text="four", corrected_text="floor",
+            db_path,
+            profile_id="bob",
+            session_id="s2",
+            original_text="four",
+            corrected_text="floor",
         )
         all_events = feedback_store.query_feedback_events(db_path)
         assert len(all_events) == 2

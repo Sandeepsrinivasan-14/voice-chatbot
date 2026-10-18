@@ -42,7 +42,9 @@ _SRC_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # .../sr
 if _SRC_DIR not in sys.path:
     sys.path.insert(0, _SRC_DIR)
 
-DEFAULT_BASE_MODEL = "openai/whisper-small"  # HF hub name; matches CONFIG.whisper_model_size="small"
+DEFAULT_BASE_MODEL = (
+    "openai/whisper-small"  # HF hub name; matches CONFIG.whisper_model_size="small"
+)
 # Attention projection layers -- the standard LoRA target for Whisper's
 # transformer stack; adapts a small fraction of the ~240M base parameters.
 DEFAULT_LORA_TARGET_MODULES = ["q_proj", "v_proj"]
@@ -80,9 +82,13 @@ def _import_training_stack():
             "(a multi-GB download; not needed for the live app)."
         ) from exc
     return (
-        torch, DataLoader, TorchDataset,
-        WhisperForConditionalGeneration, WhisperProcessor,
-        LoraConfig, get_peft_model,
+        torch,
+        DataLoader,
+        TorchDataset,
+        WhisperForConditionalGeneration,
+        WhisperProcessor,
+        LoraConfig,
+        get_peft_model,
     )
 
 
@@ -131,13 +137,18 @@ def train(dataset_manifest_path: str, output_dir: str, *, config: TrainingConfig
     installed, or ValueError if the manifest has no training-split rows.
     """
     (
-        torch, DataLoader, TorchDataset,
-        WhisperForConditionalGeneration, WhisperProcessor,
-        LoraConfig, get_peft_model,
+        torch,
+        DataLoader,
+        TorchDataset,
+        WhisperForConditionalGeneration,
+        WhisperProcessor,
+        LoraConfig,
+        get_peft_model,
     ) = _import_training_stack()
 
     rows = [
-        r for r in dataset_builder.load_manifest_rows(dataset_manifest_path)
+        r
+        for r in dataset_builder.load_manifest_rows(dataset_manifest_path)
         if r["split"] == "train"
     ]
     if not rows:
@@ -208,9 +219,12 @@ def _converter_executable() -> str:
 def _convert_to_ctranslate2(hf_dir: str, ct2_dir: str) -> None:
     cmd = [
         _converter_executable(),
-        "--model", hf_dir,
-        "--output_dir", ct2_dir,
-        "--quantization", "int8_float16",
+        "--model",
+        hf_dir,
+        "--output_dir",
+        ct2_dir,
+        "--quantization",
+        "int8_float16",
         "--force",
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True)
@@ -246,13 +260,17 @@ def run_pipeline(args: argparse.Namespace) -> None:
     if not os.path.exists(manifest_path):
         raise SystemExit(
             f"No dataset at {manifest_path}. Build one first:\n"
-            f"  python -c \"from learning import dataset_builder as d; "
-            f"d.build_dataset({args.db_path!r}, {args.datasets_root!r})\""
+            f'  python -c "from learning import dataset_builder as d; '
+            f'd.build_dataset({args.db_path!r}, {args.datasets_root!r})"'
         )
 
     config = TrainingConfig(
-        base_model=args.base_model, epochs=args.epochs, batch_size=args.batch_size,
-        learning_rate=args.learning_rate, lora_r=args.lora_r, lora_alpha=args.lora_alpha,
+        base_model=args.base_model,
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        learning_rate=args.learning_rate,
+        lora_r=args.lora_r,
+        lora_alpha=args.lora_alpha,
     )
     output_dir = os.path.join(args.models_root, "_pending", args.dataset_version)
     print(f"[training] fine-tuning {config.base_model} on {manifest_path} ...")
@@ -274,8 +292,10 @@ def run_pipeline(args: argparse.Namespace) -> None:
         args.baseline_model, device=args.device, compute_type=args.baseline_compute_type
     )
     baseline_result = evaluation.evaluate_model_on_dataset(
-        baseline_transcribe, manifest_rows,
-        model_label=f"production ({args.baseline_model})", dataset_version=args.dataset_version,
+        baseline_transcribe,
+        manifest_rows,
+        model_label=f"production ({args.baseline_model})",
+        dataset_version=args.dataset_version,
     )
 
     print("[training] evaluating candidate model on the same held-out split ...")
@@ -283,12 +303,15 @@ def run_pipeline(args: argparse.Namespace) -> None:
         ct2_dir, device=args.device, compute_type=args.baseline_compute_type
     )
     candidate_result = evaluation.evaluate_model_on_dataset(
-        candidate_transcribe, manifest_rows,
-        model_label=f"candidate ({version})", dataset_version=args.dataset_version,
+        candidate_transcribe,
+        manifest_rows,
+        model_label=f"candidate ({version})",
+        dataset_version=args.dataset_version,
     )
 
     comparison = evaluation.compare_models(
-        baseline_result, candidate_result,
+        baseline_result,
+        candidate_result,
         min_relative_improvement=args.min_relative_improvement,
     )
     model_registry.record_evaluation(args.registry_path, version, asdict(comparison))
@@ -321,13 +344,19 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description="Fine-tune the STT model on accumulated corrections (foundation-phase LoRA/PEFT trainer)."
     )
-    p.add_argument("--dataset-version", required=True, help='e.g. "v1", from dataset_builder.build_dataset()')
+    p.add_argument(
+        "--dataset-version", required=True, help='e.g. "v1", from dataset_builder.build_dataset()'
+    )
     p.add_argument("--db-path", default=os.path.join("data", "learning", "feedback.db"))
     p.add_argument("--datasets-root", default=os.path.join("data", "learning", "datasets"))
     p.add_argument("--models-root", default=os.path.join("data", "learning", "models"))
-    p.add_argument("--registry-path", default=os.path.join("data", "learning", "models", "registry.json"))
+    p.add_argument(
+        "--registry-path", default=os.path.join("data", "learning", "models", "registry.json")
+    )
     p.add_argument("--base-model", default=DEFAULT_BASE_MODEL, help="HF hub model to fine-tune")
-    p.add_argument("--baseline-model", default="small", help="faster-whisper model/size to compare against")
+    p.add_argument(
+        "--baseline-model", default="small", help="faster-whisper model/size to compare against"
+    )
     p.add_argument("--baseline-compute-type", default="int8")
     p.add_argument("--device", default="cpu", choices=["cpu", "cuda"])
     p.add_argument("--epochs", type=int, default=3)
@@ -337,7 +366,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--lora-alpha", type=int, default=16)
     p.add_argument("--min-relative-improvement", type=float, default=0.05)
     p.add_argument(
-        "--promote", action="store_true",
+        "--promote",
+        action="store_true",
         help="Promote the candidate to production if its evaluation recommends it.",
     )
     return p
