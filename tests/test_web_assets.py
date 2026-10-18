@@ -76,7 +76,9 @@ class TestChatUiAssets:
         for module in modules:
             for target in pattern.findall(_read(module)):
                 resolved = os.path.normpath(os.path.join(os.path.dirname(module), target))
-                assert os.path.isfile(resolved), f"{os.path.basename(module)} imports missing {target}"
+                assert os.path.isfile(resolved), (
+                    f"{os.path.basename(module)} imports missing {target}"
+                )
                 rel = os.path.relpath(resolved, CHAT_DIR).replace(os.sep, "/")
                 assert client.get("/" + rel).status_code == 200, rel
 
@@ -100,7 +102,9 @@ class TestChatUiAssets:
         assert resp.status_code == 404
         assert resp.get_json() == {"error": "Not found."}
 
-    @pytest.mark.parametrize("path", ["/../config.py", "/%2e%2e/config.py", "/js/../../config.py", "/js/", "/css"])
+    @pytest.mark.parametrize(
+        "path", ["/../config.py", "/%2e%2e/config.py", "/js/../../config.py", "/js/", "/css"]
+    )
     def test_cannot_escape_or_list_the_static_directory(self, client, path):
         resp = client.get(path)
         assert resp.status_code == 404
@@ -148,7 +152,9 @@ class TestFrontEndsStayOfflineAndCspClean:
         # permitted URLs are XML namespace identifiers (never requested).
         offenders = []
         for path in _walk(directory, (".html", ".css", ".js", ".svg")):
-            for url in re.findall(r"""(?:https?:)?//[A-Za-z0-9.-]+\.[a-z]{2,}[^\s"'`)]*""", _read(path)):
+            for url in re.findall(
+                r"""(?:https?:)?//[A-Za-z0-9.-]+\.[a-z]{2,}[^\s"'`)]*""", _read(path)
+            ):
                 if "www.w3.org" in url:
                     continue
                 offenders.append(f"{os.path.relpath(path, directory)}: {url}")
@@ -169,6 +175,8 @@ class TestFrontEndsStayOfflineAndCspClean:
         for path in _walk(CHAT_DIR, (".js",)) + _walk(RECORDER_DIR, (".js",)):
             code = _read(path)
             name = os.path.relpath(path, SRC_DIR)
-            assert not re.search(r"\beval\(|new Function\(|\.innerHTML\s*=\s*(?!['\"\s])", code), name
+            assert not re.search(r"\beval\(|new Function\(|\.innerHTML\s*=\s*(?!['\"\s])", code), (
+                name
+            )
             assert 'setAttribute("style"' not in code and "setAttribute('style'" not in code, name
             assert "cssText" not in code, name

@@ -188,7 +188,9 @@ class TestRespond:
             json.dumps({"message": {"content": " there"}, "done": False}).encode(),
             json.dumps({"message": {"content": ""}, "done": True}).encode(),
         ]
-        monkeypatch.setattr(chat_web.requests, "post", lambda *a, **k: _FakeStreamingResponse(lines))
+        monkeypatch.setattr(
+            chat_web.requests, "post", lambda *a, **k: _FakeStreamingResponse(lines)
+        )
 
         resp = client.post("/api/respond", json={"message": "hi", "history": []})
         assert resp.status_code == 200
@@ -224,10 +226,14 @@ class TestRespond:
         # Zero retries so the test doesn't sleep; respond_endpoint's
         # generate() only reads these CONFIG attributes.
         monkeypatch.setattr(
-            chat_web, "CONFIG",
+            chat_web,
+            "CONFIG",
             SimpleNamespace(
-                ollama_max_retries=0, ollama_timeout_s=1,
-                ollama_model="llama3.2:3b", ollama_model_ta="", ollama_auto_pull_ta_model=False,
+                ollama_max_retries=0,
+                ollama_timeout_s=1,
+                ollama_model="llama3.2:3b",
+                ollama_model_ta="",
+                ollama_auto_pull_ta_model=False,
             ),
         )
 
@@ -262,7 +268,12 @@ class TestTranscribeLearningDisabled:
         resp = client.post("/api/transcribe", data=data, content_type="multipart/form-data")
         assert resp.status_code == 200
         assert set(resp.get_json().keys()) == {
-            "text", "decision", "avg_logprob", "threshold", "accepted", "whisper_device",
+            "text",
+            "decision",
+            "avg_logprob",
+            "threshold",
+            "accepted",
+            "whisper_device",
             "language",
         }
 
@@ -328,8 +339,10 @@ class TestFeedbackEndpoint:
     def test_disabled_by_default_returns_400(self, client):
         resp = client.post(
             "/api/feedback",
-            json={"original_text": "I went to Chennai with John",
-                   "corrected_text": "I went to Chennai with Jon"},
+            json={
+                "original_text": "I went to Chennai with John",
+                "corrected_text": "I went to Chennai with Jon",
+            },
         )
         assert resp.status_code == 400
         assert "error" in resp.get_json()

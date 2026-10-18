@@ -125,6 +125,8 @@ def run_app(app: Flask, *, host: str, port: int, name: str) -> None:
         print(f"[{name}] PRODUCTION mode -- serving via waitress on http://{host}:{port}")
         serve(app, host=host, port=port)
     else:
-        print(f"[{name}] Dev mode -- serving via Flask's development server on http://{host}:{port}")
+        print(
+            f"[{name}] Dev mode -- serving via Flask's development server on http://{host}:{port}"
+        )
         print(f"[{name}] Set PRODUCTION=1 to serve via waitress instead (see README section 7).")
         app.run(host=host, port=port, debug=False, threaded=True)

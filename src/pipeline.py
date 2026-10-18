@@ -62,10 +62,10 @@ SAMPLE_RATE = CONFIG.sample_rate  # required by both webrtcvad and whisper
 FRAME_MS = CONFIG.frame_ms
 FRAME_SAMPLES = int(SAMPLE_RATE * FRAME_MS / 1000)  # 480 samples/frame
 VAD_AGGRESSIVENESS = CONFIG.vad_aggressiveness  # 0 (permissive) .. 3 (strict)
-SILENCE_FRAMES_TO_STOP = int(800 / FRAME_MS)   # ~0.8s trailing silence ends capture
-MIN_SPEECH_FRAMES = int(150 / FRAME_MS)         # ignore blips shorter than this
+SILENCE_FRAMES_TO_STOP = int(800 / FRAME_MS)  # ~0.8s trailing silence ends capture
+MIN_SPEECH_FRAMES = int(150 / FRAME_MS)  # ignore blips shorter than this
 MAX_RECORD_SECONDS = CONFIG.max_record_seconds
-PRE_SPEECH_PADDING_FRAMES = 10                   # ~300ms of audio kept before trigger
+PRE_SPEECH_PADDING_FRAMES = 10  # ~300ms of audio kept before trigger
 
 WHISPER_MODEL_SIZE = CONFIG.whisper_model_size
 WHISPER_COMPUTE_TYPE_GPU = CONFIG.whisper_compute_type_gpu
@@ -489,8 +489,11 @@ def _indic_worker_script_path() -> str:
 def _spawn_indic_worker() -> subprocess.Popen:
     return subprocess.Popen(
         [sys.executable, _indic_worker_script_path()],
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        text=True, bufsize=1,  # line-buffered: matches the worker's one-JSON-object-per-line protocol
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,  # line-buffered: matches the worker's one-JSON-object-per-line protocol
     )
 
 
@@ -560,7 +563,9 @@ def synthesize_tamil_via_worker(text: str, out_path: str) -> str:
             _kill_indic_worker()  # always respawn fresh next call, whether it crashed or just hung
             if returncode is not None:
                 raise RuntimeError(f"Tamil TTS worker process crashed (exit code {returncode}).")
-            raise RuntimeError(f"Tamil TTS worker process timed out after {_INDIC_WORKER_TIMEOUT_S}s.")
+            raise RuntimeError(
+                f"Tamil TTS worker process timed out after {_INDIC_WORKER_TIMEOUT_S}s."
+            )
 
         response = json.loads(response_line)
         if not response.get("ok"):

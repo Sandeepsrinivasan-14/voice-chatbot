@@ -76,7 +76,9 @@ register_security_headers(app)
 register_static_routes(app, STATIC_DIR)
 _whisper_model = None
 _whisper_device = None
-_whisper_model_version = "stock"  # registry version string, or "stock" for CONFIG.whisper_model_size
+_whisper_model_version = (
+    "stock"  # registry version string, or "stock" for CONFIG.whisper_model_size
+)
 _whisper_swap_lock = threading.Lock()  # guards swapping the globals themselves, not their use
 
 # Serializes every GPU-using call this process makes (Whisper transcription
@@ -132,9 +134,7 @@ def _load_initial_whisper_model() -> None:
             )
     if production is not None:
         try:
-            model, device = pipeline.load_whisper_model_from_path(
-                production["artifact_path"]
-            )
+            model, device = pipeline.load_whisper_model_from_path(production["artifact_path"])
             _whisper_model, _whisper_device = model, device
             _whisper_model_version = production["version"]
             print(
@@ -230,14 +230,16 @@ def ensure_ollama_ta_model_pulled() -> None:
         logger.info(
             "Tamil LLM model %s not present and auto-pull is disabled; "
             "Tamil replies will use %s instead.",
-            CONFIG.ollama_model_ta, CONFIG.ollama_model,
+            CONFIG.ollama_model_ta,
+            CONFIG.ollama_model,
         )
         return
 
     logger.info(
         "Pulling Tamil LLM model %s in the background (multi-GB, one-time; "
         "Tamil replies use %s until this finishes)...",
-        CONFIG.ollama_model_ta, CONFIG.ollama_model,
+        CONFIG.ollama_model_ta,
+        CONFIG.ollama_model,
     )
     try:
         with requests.post(
@@ -259,12 +261,15 @@ def ensure_ollama_ta_model_pulled() -> None:
         else:
             logger.warning(
                 "Pull of %s finished without error but the model isn't listed; "
-                "Tamil will keep using %s.", CONFIG.ollama_model_ta, CONFIG.ollama_model,
+                "Tamil will keep using %s.",
+                CONFIG.ollama_model_ta,
+                CONFIG.ollama_model,
             )
     except Exception:  # noqa: BLE001 -- must never crash the server or block startup
         logger.exception(
             "Failed to auto-pull Tamil LLM model %s; Tamil replies will use %s instead.",
-            CONFIG.ollama_model_ta, CONFIG.ollama_model,
+            CONFIG.ollama_model_ta,
+            CONFIG.ollama_model,
         )
 
 
@@ -293,7 +298,11 @@ def ensure_tamil_tts_checkpoint_pulled() -> None:
 @app.route("/api/health")
 def health():
     return jsonify(
-        {"ok": True, "whisper_device": _whisper_device, "whisper_model_version": _whisper_model_version}
+        {
+            "ok": True,
+            "whisper_device": _whisper_device,
+            "whisper_model_version": _whisper_model_version,
+        }
     )
 
 
@@ -504,14 +513,20 @@ def feedback_endpoint():
         app.logger.warning("Failed to store feedback event (%s).", exc)
         return jsonify({"error": "Could not store feedback."}), 500
 
-    return jsonify({
-        "ok": True,
-        "event_id": event.event_uuid,
-        "diff": [
-            {"op": d.op, "original_phrase": d.original_phrase, "corrected_phrase": d.corrected_phrase}
-            for d in event.diffs
-        ],
-    })
+    return jsonify(
+        {
+            "ok": True,
+            "event_id": event.event_uuid,
+            "diff": [
+                {
+                    "op": d.op,
+                    "original_phrase": d.original_phrase,
+                    "corrected_phrase": d.corrected_phrase,
+                }
+                for d in event.diffs
+            ],
+        }
+    )
 
 
 @app.route("/api/respond", methods=["POST"])

@@ -75,7 +75,9 @@ def plan():
     saved recording, so reloading the page resumes instead of restarting.
     """
     words_param = request.args.get("words")
-    word_list = [w.strip() for w in words_param.split(",") if w.strip()] if words_param else DEFAULT_WORDS
+    word_list = (
+        [w.strip() for w in words_param.split(",") if w.strip()] if words_param else DEFAULT_WORDS
+    )
     done = {(r["expected_word"], r["modulation"]) for r in load_manifest_rows()}
     combos = [
         {"word": w, "modulation": m, "done": [w, m] in [list(d) for d in done]}
@@ -110,13 +112,16 @@ def upload():
     sf.write(filepath, audio, SAMPLE_RATE)
 
     rows = [
-        r for r in load_manifest_rows()
+        r
+        for r in load_manifest_rows()
         if not (r["expected_word"] == word and r["modulation"] == modulation)
     ]
     rows.append({"filename": filename, "expected_word": word, "modulation": modulation})
     save_manifest_rows(rows)
 
-    return jsonify({"ok": True, "filename": filename, "duration_s": round(audio.size / SAMPLE_RATE, 2)})
+    return jsonify(
+        {"ok": True, "filename": filename, "duration_s": round(audio.size / SAMPLE_RATE, 2)}
+    )
 
 
 @app.route("/api/health")

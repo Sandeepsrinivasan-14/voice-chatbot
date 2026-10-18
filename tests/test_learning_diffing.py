@@ -14,9 +14,7 @@ from learning import diffing
 class TestWordDiff:
     def test_single_word_replace_is_isolated(self):
         # The exact example from the design spec.
-        diffs = diffing.word_diff(
-            "I went to Chennai with John", "I went to Chennai with Jon"
-        )
+        diffs = diffing.word_diff("I went to Chennai with John", "I went to Chennai with Jon")
         assert len(diffs) == 1
         d = diffs[0]
         assert d.op == "replace"
@@ -27,9 +25,7 @@ class TestWordDiff:
         assert diffing.word_diff("hello there", "hello there") == []
 
     def test_context_before_captured_from_original(self):
-        diffs = diffing.word_diff(
-            "I went to Chennai with John", "I went to Chennai with Jon"
-        )
+        diffs = diffing.word_diff("I went to Chennai with John", "I went to Chennai with Jon")
         assert "Chennai" in diffs[0].context_before
 
     def test_pure_insertion_reported_as_insert(self):

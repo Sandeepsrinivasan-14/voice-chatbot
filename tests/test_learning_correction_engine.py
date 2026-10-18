@@ -31,8 +31,11 @@ def _seed_rule(db_path, sentence_with_original, corrected_word, original_word, r
     corrected_sentence = sentence_with_original.replace(original_word, corrected_word)
     for _ in range(repeats):
         event = feedback_store.insert_feedback_event(
-            db_path, profile_id=PROFILE, session_id="s1",
-            original_text=sentence_with_original, corrected_text=corrected_sentence,
+            db_path,
+            profile_id=PROFILE,
+            session_id="s1",
+            original_text=sentence_with_original,
+            corrected_text=corrected_sentence,
         )
         correction_memory.upsert_rule_from_event(db_path, event)
 
@@ -134,10 +137,22 @@ class TestApplyAutoCorrections:
 
         text = "meet me at four o'clock"
         suggestions = [
-            Suggestion(rule_id=1, original_phrase="four", corrected_phrase="for",
-                       span=(3, 4), score=0.95, band="auto_apply"),
-            Suggestion(rule_id=2, original_phrase="o'clock", corrected_phrase="oclock",
-                       span=(4, 5), score=0.7, band="suggest"),
+            Suggestion(
+                rule_id=1,
+                original_phrase="four",
+                corrected_phrase="for",
+                span=(3, 4),
+                score=0.95,
+                band="auto_apply",
+            ),
+            Suggestion(
+                rule_id=2,
+                original_phrase="o'clock",
+                corrected_phrase="oclock",
+                span=(4, 5),
+                score=0.7,
+                band="suggest",
+            ),
         ]
         new_text, applied = correction_engine.apply_auto_corrections(text, suggestions)
         assert new_text == "meet me at for o'clock"

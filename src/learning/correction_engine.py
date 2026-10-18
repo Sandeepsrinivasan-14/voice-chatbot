@@ -49,9 +49,7 @@ def _find_spans(lowered_tokens: list[str], phrase_tokens: list[str]) -> list[tup
     n, m = len(lowered_tokens), len(phrase_tokens)
     if m == 0 or n < m:
         return []
-    return [
-        (i, i + m) for i in range(n - m + 1) if lowered_tokens[i : i + m] == phrase_tokens
-    ]
+    return [(i, i + m) for i in range(n - m + 1) if lowered_tokens[i : i + m] == phrase_tokens]
 
 
 def _local_context(tokens: list[str], start: int, end: int) -> str:
@@ -96,12 +94,8 @@ def suggest_corrections(
             )
 
             if context_aware_enabled:
-                current_context = " ".join(
-                    [context_before, _local_context(tokens, start, end)]
-                )
-                learned_context = " ".join(
-                    [rule.context_before_sample, rule.context_after_sample]
-                )
+                current_context = " ".join([context_before, _local_context(tokens, start, end)])
+                learned_context = " ".join([rule.context_before_sample, rule.context_after_sample])
                 context_sim = correction_scoring.context_similarity(
                     learned_context, current_context
                 )

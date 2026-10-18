@@ -104,4 +104,7 @@ class TestTranscriptExport:
         assert "You: Hello there" in txt and "Assistant: Hi!\nHow can I help?" in txt
 
     def test_filename_stamp_is_sortable(self):
-        assert _run_node("console.log(JSON.stringify(stamp(new Date(2026, 0, 2, 3, 4))));") == "2026-01-02-0304"
+        assert (
+            _run_node("console.log(JSON.stringify(stamp(new Date(2026, 0, 2, 3, 4))));")
+            == "2026-01-02-0304"
+        )

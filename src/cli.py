@@ -109,12 +109,14 @@ def run_preflight() -> bool:
 # --------------------------------------------------------------------
 def run_cli():
     pipeline.setup_logging()
-    console.print(Panel.fit(
-        "[bold cyan]Local Voice Chatbot[/bold cyan]\n"
-        "Fully offline: faster-whisper + Ollama + Piper\n"
-        "Say 'exit' or press Ctrl+C to quit.",
-        border_style="cyan",
-    ))
+    console.print(
+        Panel.fit(
+            "[bold cyan]Local Voice Chatbot[/bold cyan]\n"
+            "Fully offline: faster-whisper + Ollama + Piper\n"
+            "Say 'exit' or press Ctrl+C to quit.",
+            border_style="cyan",
+        )
+    )
 
     if not run_preflight():
         console.print("\n[bold red]Fix the issues above and re-run.[/bold red]")
@@ -161,9 +163,7 @@ def run_cli():
             t0 = time.time()
             response_parts: list[str] = []
             try:
-                response = pipeline.generate_response(
-                    text, on_token=response_parts.append
-                )
+                response = pipeline.generate_response(text, on_token=response_parts.append)
             except RuntimeError as exc:
                 console.print(f"[bold red]{exc}[/bold red]")
                 continue

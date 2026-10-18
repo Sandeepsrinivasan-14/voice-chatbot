@@ -42,9 +42,7 @@ def _save(registry_path: str, data: dict) -> None:
 
 
 def _next_version(data: dict) -> str:
-    numbers = [
-        int(m.group(1)) for v in data["models"] if (m := re.fullmatch(r"v(\d+)", v))
-    ]
+    numbers = [int(m.group(1)) for v in data["models"] if (m := re.fullmatch(r"v(\d+)", v))]
     return f"v{max(numbers) + 1 if numbers else 1}"
 
 

@@ -22,6 +22,7 @@ import sys
 from collections import defaultdict
 
 import matplotlib
+
 matplotlib.use("Agg")  # headless-safe; we only ever save the figure to disk
 import matplotlib.pyplot as plt
 import soundfile as sf
@@ -86,6 +87,7 @@ def run_benchmark():
         # Construction alone doesn't prove the GPU path works on Windows --
         # missing cuBLAS/cuDNN DLLs only surface on first real inference.
         import numpy as _np
+
         list(model.transcribe(_np.zeros(4000, dtype=_np.float32), language="en")[0])
         print("[benchmark] Using GPU for faster-whisper.")
     except Exception as exc:
@@ -112,8 +114,10 @@ def run_benchmark():
         prep_text = transcribe_once(model, processed_audio, sr)
         prep_ok = word_correct(prep_text, expected)
 
-        print(f"    raw='{raw_text}' ({'OK' if raw_ok else 'MISS'})  "
-              f"preprocessed='{prep_text}' ({'OK' if prep_ok else 'MISS'})")
+        print(
+            f"    raw='{raw_text}' ({'OK' if raw_ok else 'MISS'})  "
+            f"preprocessed='{prep_text}' ({'OK' if prep_ok else 'MISS'})"
+        )
 
         results.append(
             {

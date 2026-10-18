@@ -73,9 +73,7 @@ def frequency_score(frequency: int, saturation: int) -> float:
     return max(0.0, min(1.0, frequency / saturation))
 
 
-def recency_score(
-    last_seen_at: str, halflife_days: float, now: datetime | None = None
-) -> float:
+def recency_score(last_seen_at: str, halflife_days: float, now: datetime | None = None) -> float:
     """Exponential decay: a rule last confirmed `halflife_days` ago scores
     0.5, one confirmed just now scores ~1.0, one confirmed long ago decays
     toward 0. Malformed timestamps score 0.0 (treated as unknown/stale)

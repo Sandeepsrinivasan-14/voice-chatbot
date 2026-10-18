@@ -40,8 +40,7 @@ def check_cuda() -> bool:
         if count > 0:
             print(f"  PASS -- {count} CUDA device(s) visible to CTranslate2.")
             return True
-        print("  WARN -- no CUDA device visible. Whisper will run on CPU "
-              "(slower, but functional).")
+        print("  WARN -- no CUDA device visible. Whisper will run on CPU (slower, but functional).")
         return False
     except Exception as exc:
         print(f"  FAIL -- {exc}")
@@ -60,7 +59,9 @@ def check_faster_whisper() -> bool:
         device = "cuda"
         try:
             model = WhisperModel(
-                CONFIG.whisper_model_size, device="cuda", compute_type=CONFIG.whisper_compute_type_gpu
+                CONFIG.whisper_model_size,
+                device="cuda",
+                compute_type=CONFIG.whisper_compute_type_gpu,
             )
             # Construction can succeed on Windows even when cuBLAS/cuDNN
             # DLLs are missing -- the failure only shows up on the first
@@ -70,7 +71,9 @@ def check_faster_whisper() -> bool:
             print(f"  GPU path unusable ({exc}), falling back to CPU.")
             device = "cpu"
             model = WhisperModel(
-                CONFIG.whisper_model_size, device="cpu", compute_type=CONFIG.whisper_compute_type_cpu
+                CONFIG.whisper_model_size,
+                device="cpu",
+                compute_type=CONFIG.whisper_compute_type_cpu,
             )
 
         segments, info = model.transcribe(audio, language="en")
@@ -91,8 +94,10 @@ def check_ollama() -> bool:
         resp.raise_for_status()
         models = [m["name"] for m in resp.json().get("models", [])]
         if not models:
-            print("  WARN -- Ollama is running but no models are pulled. Run:\n"
-                  f"         ollama pull {CONFIG.ollama_model}")
+            print(
+                "  WARN -- Ollama is running but no models are pulled. Run:\n"
+                f"         ollama pull {CONFIG.ollama_model}"
+            )
             return False
         print(f"  Ollama is running. Installed models: {models}")
 
@@ -102,8 +107,10 @@ def check_ollama() -> bool:
         # over an unrelated leftover model while the real one is fine.
         model_name = CONFIG.ollama_model
         if model_name not in models:
-            print(f"  WARN -- configured model '{model_name}' is not pulled. Run:\n"
-                  f"         ollama pull {model_name}")
+            print(
+                f"  WARN -- configured model '{model_name}' is not pulled. Run:\n"
+                f"         ollama pull {model_name}"
+            )
             return False
         # First generation after Ollama starts pays a one-time cost to
         # load model weights into (V)RAM -- give it real headroom rather
@@ -119,8 +126,10 @@ def check_ollama() -> bool:
         print(f"  PASS -- '{model_name}' responded: {text[:80]!r}")
         return True
     except requests.exceptions.ConnectionError:
-        print(f"  FAIL -- could not connect to {CONFIG.ollama_url}. "
-              "Run `ollama serve` (or start the Ollama app) first.")
+        print(
+            f"  FAIL -- could not connect to {CONFIG.ollama_url}. "
+            "Run `ollama serve` (or start the Ollama app) first."
+        )
         return False
     except Exception as exc:
         print(f"  FAIL -- {exc}")
@@ -132,9 +141,11 @@ def check_piper() -> bool:
     piper_exe = CONFIG.piper_executable
     model_path = CONFIG.piper_model_path
     if not os.path.exists(model_path):
-        print(f"  FAIL -- voice model not found at {model_path}. Download one from "
-              "https://github.com/rhasspy/piper/releases (.onnx + .onnx.json) "
-              "or set PIPER_MODEL_PATH.")
+        print(
+            f"  FAIL -- voice model not found at {model_path}. Download one from "
+            "https://github.com/rhasspy/piper/releases (.onnx + .onnx.json) "
+            "or set PIPER_MODEL_PATH."
+        )
         return False
     out_path = os.path.join("logs", "_verify_piper_test.wav")
     os.makedirs("logs", exist_ok=True)
@@ -145,8 +156,9 @@ def check_piper() -> bool:
             capture_output=True,
         )
         if proc.returncode != 0:
-            print(f"  FAIL -- piper exited {proc.returncode}: "
-                  f"{proc.stderr.decode(errors='replace')}")
+            print(
+                f"  FAIL -- piper exited {proc.returncode}: {proc.stderr.decode(errors='replace')}"
+            )
             return False
         if os.path.exists(out_path) and os.path.getsize(out_path) > 0:
             print(f"  PASS -- wrote {out_path} ({os.path.getsize(out_path)} bytes).")
@@ -154,8 +166,10 @@ def check_piper() -> bool:
         print("  FAIL -- piper ran but produced no output file.")
         return False
     except FileNotFoundError:
-        print(f"  FAIL -- '{piper_exe}' executable not found on PATH. "
-              "Install piper-tts (pip) or download the piper binary.")
+        print(
+            f"  FAIL -- '{piper_exe}' executable not found on PATH. "
+            "Install piper-tts (pip) or download the piper binary."
+        )
         return False
     except Exception as exc:
         print(f"  FAIL -- {exc}")
