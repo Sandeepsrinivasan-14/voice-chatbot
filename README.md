@@ -260,6 +260,7 @@ accumulated feedback events into a versioned, reproducible dataset:
 
 ```python
 from learning import dataset_builder
+
 manifest = dataset_builder.build_dataset("data/learning/feedback.db", "data/learning/datasets")
 ```
 
