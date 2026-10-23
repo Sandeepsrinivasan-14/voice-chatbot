@@ -18,7 +18,7 @@
 faster-whisper>=1.0.3
 
 # --- audio capture / VAD / DSP ---
-sounddevice>=0.4.6          # mic capture + playback (PortAudio bindings)
+sounddevice>=0.5.6          # mic capture + playback (PortAudio bindings)
 numpy>=1.26.0
 librosa>=0.10.2             # normalization, pitch/speed analysis
 soundfile>=0.12.1           # wav read/write
