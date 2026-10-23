@@ -44,4 +44,4 @@ waitress>=3.0.0              # production WSGI server (Windows-compatible,
 # extra entry needed here.
 
 # --- configuration ---
-python-dotenv>=1.0.0         # loads a local .env file, see .env.example
+python-dotenv>=1.2.4         # loads a local .env file, see .env.example
