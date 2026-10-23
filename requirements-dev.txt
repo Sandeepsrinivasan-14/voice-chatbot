@@ -5,7 +5,7 @@
 # mocks every GPU-dependent call (see tests/conftest.py), so CI never
 # needs the ~1.3GB of CUDA wheels.
 -r requirements.txt
-pytest>=8.0.0
+pytest>=9.1.1
 ruff>=0.6.0
 mypy>=1.10.0
 types-requests
